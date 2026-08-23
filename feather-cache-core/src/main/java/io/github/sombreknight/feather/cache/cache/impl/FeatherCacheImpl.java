@@ -293,10 +293,10 @@ public class FeatherCacheImpl implements FeatherCache {
         String cacheKey = namingStrategy.cacheKey(key);
         switch (config.getType()) {
             case LOCAL_ONLY -> localCacheClient.set(cacheKey, codec.toJson(value), config.getLocalTtl());
-            case REDIS_ONLY -> redisCacheClient.set(cacheKey, codec.toJson(value), config.getTtl());
+            case REDIS_ONLY -> redisCacheClient.set(cacheKey, codec.toJson(value), config.getRedisTtl());
             case LOCAL_FIRST_THEN_REDIS -> {
                 localCacheClient.set(cacheKey, codec.toJson(value), config.getLocalTtl());
-                redisCacheClient.set(cacheKey, codec.toJson(value), config.getTtl());
+                redisCacheClient.set(cacheKey, codec.toJson(value), config.getRedisTtl());
             }
             default -> throw new IllegalArgumentException("不支持的缓存类型: " + config.getType());
         }
@@ -323,9 +323,9 @@ public class FeatherCacheImpl implements FeatherCache {
     }
 
     /**
-     * 分层 TTL：本地层 {@code localTtl}（per-key 独立），Redis 层 {@code ttl}。
+     * 分层 TTL：本地层 {@code localTtl}（per-key 独立），Redis 层 {@code redisTtl}。
      */
     private java.time.Duration layerTtl(CacheConfig config, CacheClient client) {
-        return client == localCacheClient ? config.getLocalTtl() : config.getTtl();
+        return client == localCacheClient ? config.getLocalTtl() : config.getRedisTtl();
     }
 }
