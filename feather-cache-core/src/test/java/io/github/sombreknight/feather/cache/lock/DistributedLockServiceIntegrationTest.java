@@ -141,14 +141,16 @@ class DistributedLockServiceIntegrationTest {
 
     @Test
     void releaseDoesNotDeleteOthersLockAfterExpiry() throws Exception {
-        // 用无看门狗的 service 持有锁，锁到期自然过期（有看门狗会持续续期）
+        // 用无看门狗的 service 持有锁；锁时长给足，避免测试期间自然过期干扰
         DistributedLockService noWatchDog = new DistributedLockService(
                 new NamingStrategy("test-app"), redisClient, false);
-        FeatherLock holder = noWatchDog.lock("order:5", Duration.ofSeconds(1), Duration.ofSeconds(1));
+        FeatherLock holder = noWatchDog.lock("order:5", Duration.ofSeconds(1), Duration.ofSeconds(30));
         String lockKey = new NamingStrategy("test-app").lockKey("order:5");
 
-        // 模拟业务执行超过锁时长：锁在 redis 侧过期，他人（其他线程）加锁成功
-        Thread.sleep(1200);
+        // 模拟锁在 redis 侧过期（等价于业务执行超时 TTL 到期）：直接删除锁 key
+        redisTemplate.delete(lockKey);
+
+        // 他人（其他线程）加锁成功，持有新 value
         Optional<FeatherLock> other = inOtherThread(() -> lockService.tryLock("order:5"));
         assertThat(other).isPresent();
 
