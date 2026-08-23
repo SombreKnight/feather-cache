@@ -80,9 +80,9 @@ central-publishing-maven-plugin + GPG 无口令密钥 + GitHub Actions），发�
 
 ## 8. 待办
 
-- M1：FeatherRedisClient + pipeline mget + 异常策略
-- M2：FeatherCache 三模式 + 防击穿/穿透 + 批量回源
-- M3：Lua 锁 + 看门狗 + AutoCloseable + execute 模板
-- M4：starter 装配完整化（@ConditionalOnMissingBean 各组件）
-- M5：samples + usage.md + docs/design.md
-- M6：发布（GPG + Central Portal + CI 验证）
+- [x] M1：FeatherRedisClient + pipeline mget + 异常策略（commit 见 git log）
+- [ ] M2：FeatherCache 三模式 + 防击穿/穿透 + 批量回源
+- [ ] M3：Lua 锁 + 看门狗 + AutoCloseable + execute 模板
+- [ ] M4：starter 装配完整化（@ConditionalOnMissingBean 各组件）
+- [ ] M5：samples + usage.md + docs/design.md
+- [ ] M6：发布（GPG + Central Portal + CI 验证）

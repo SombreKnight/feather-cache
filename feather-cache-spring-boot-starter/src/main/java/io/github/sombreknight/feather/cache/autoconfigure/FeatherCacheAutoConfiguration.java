@@ -1,10 +1,16 @@
 package io.github.sombreknight.feather.cache.autoconfigure;
 
+import io.github.sombreknight.feather.cache.redis.FeatherRedisClient;
+import io.github.sombreknight.feather.cache.support.NamingStrategy;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.util.StringUtils;
 
 /**
  * feather-cache 自动配置。
@@ -12,6 +18,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  * <p>当配置 {@code feather.cache.enabled=true}（默认）时，基于用户已有的
  * {@code spring.data.redis.*} 连接（Spring Data Redis / Lettuce），装配：
  * <ul>
+ *     <li>{@code NamingStrategy}：key 命名单一事实源（M1）</li>
  *     <li>{@code FeatherRedisClient}：Redis 薄封装（M1）</li>
  *     <li>{@code FeatherCache}：多级缓存服务（M2）</li>
  *     <li>{@code DistributedLockService}：分布式锁（M3）</li>
@@ -27,5 +34,26 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 @ConditionalOnProperty(prefix = "feather.cache", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class FeatherCacheAutoConfiguration {
 
-    // Bean 装配在 M1（redis）/ M2（cache）/ M3（lock）里程碑逐步加入
+    /**
+     * key 命名单一事实源；namespace 优先取 {@code feather.cache.namespace}，否则回退
+     * {@code spring.application.name}，再缺省 default。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public NamingStrategy featherNamingStrategy(FeatherCacheProperties properties, Environment environment) {
+        String namespace = properties.getNamespace();
+        if (StringUtils.hasText(namespace)) {
+            return new NamingStrategy(namespace);
+        }
+        return new NamingStrategy(environment.getProperty("spring.application.name"));
+    }
+
+    /**
+     * Redis 薄封装（StringRedisTemplate 由 Spring Boot RedisAutoConfiguration 提供）。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public FeatherRedisClient featherRedisClient(StringRedisTemplate redisTemplate) {
+        return new FeatherRedisClient(redisTemplate);
+    }
 }
