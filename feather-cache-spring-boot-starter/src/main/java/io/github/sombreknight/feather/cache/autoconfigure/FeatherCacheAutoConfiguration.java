@@ -5,6 +5,7 @@ import io.github.sombreknight.feather.cache.cache.FeatherCache;
 import io.github.sombreknight.feather.cache.cache.impl.FeatherCacheImpl;
 import io.github.sombreknight.feather.cache.cache.impl.LocalCacheClient;
 import io.github.sombreknight.feather.cache.cache.impl.RedisCacheClient;
+import io.github.sombreknight.feather.cache.lock.DistributedLockService;
 import io.github.sombreknight.feather.cache.redis.FeatherRedisClient;
 import io.github.sombreknight.feather.cache.support.JsonCodec;
 import io.github.sombreknight.feather.cache.support.NamingStrategy;
@@ -98,5 +99,15 @@ public class FeatherCacheAutoConfiguration {
     public FeatherCache featherCache(NamingStrategy namingStrategy, LocalCacheClient localCacheClient,
                                      RedisCacheClient redisCacheClient, JsonCodec codec) {
         return new FeatherCacheImpl(namingStrategy, localCacheClient, redisCacheClient, codec);
+    }
+
+    /**
+     * 分布式锁服务（AutoCloseable bean，容器销毁时自动关闭看门狗调度器）。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public DistributedLockService distributedLockService(NamingStrategy namingStrategy,
+                                                         FeatherRedisClient redisClient) {
+        return new DistributedLockService(namingStrategy, redisClient);
     }
 }
