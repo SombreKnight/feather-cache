@@ -1,0 +1,56 @@
+name: Release to Maven Central
+
+# 触发方式：推送 v* 格式的 tag，如 git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (import GPG signing key)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          # 需要在仓库 Settings → Secrets and variables → Actions 中配置：
+          #   GPG_PRIVATE_KEY     签名私钥（armored 全文，含 -----BEGIN PGP PRIVATE KEY BLOCK-----）
+          #   SONATYPE_USERNAME   central.sonatype.com 的 User Token username
+          #   SONATYPE_PASSWORD   central.sonatype.com 的 User Token password
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+
+      # 显式写入 Maven settings.xml（不依赖 setup-java 的 ${env.} 占位机制，与本地验证一致）
+      - name: Configure Maven Central credentials
+        shell: bash
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<'XML'
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+            <servers>
+              <server>
+                <id>central</id>
+                <username>${{ secrets.SONATYPE_USERNAME }}</username>
+                <password>${{ secrets.SONATYPE_PASSWORD }}</password>
+              </server>
+            </servers>
+          </settings>
+          XML
+          echo "settings.xml written, central server entries: $(grep -c 'central' ~/.m2/settings.xml)"
+
+      - name: Set project version from tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "Releasing version: ${VERSION}"
+          mvn -q versions:set -DnewVersion=${VERSION} -DgenerateBackupPoms=false
+
+      - name: Build & test
+        run: mvn -B test
+
+      - name: Deploy to Maven Central (core + starter，samples 不发布)
+        run: mvn -B clean deploy -pl '!feather-cache-samples'
