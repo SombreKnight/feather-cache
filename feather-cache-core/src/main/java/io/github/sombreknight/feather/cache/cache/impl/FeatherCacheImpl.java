@@ -123,8 +123,10 @@ public class FeatherCacheImpl implements FeatherCache {
         if (config.isCacheNull() && client.get(sentinelKey) != null) {
             return null;
         }
-        // 3. single-flight 许可
-        Semaphore semaphore = semaphoreCache.get(cacheKey, k -> new Semaphore(singleFlightPermits));
+        // 3. single-flight 许可（按层隔离：本地层/redis 层独立单飞，
+        //    避免多级缓存嵌套回源时外层持锁、内层等同一把锁死锁）
+        String semaphoreKey = (client == localCacheClient ? "local:" : "redis:") + cacheKey;
+        Semaphore semaphore = semaphoreCache.get(semaphoreKey, k -> new Semaphore(singleFlightPermits));
         try {
             semaphore.acquire();
         } catch (InterruptedException e) {
@@ -148,7 +150,7 @@ public class FeatherCacheImpl implements FeatherCache {
                 }
                 return null;
             }
-            client.set(cacheKey, codec.toJson(value), config.getTtl());
+            client.set(cacheKey, codec.toJson(value), layerTtl(config, client));
             return value;
         } finally {
             semaphore.release();
@@ -257,7 +259,7 @@ public class FeatherCacheImpl implements FeatherCache {
                     client.set(namingStrategy.sentinelKey(keyGenerator.apply(id)), SENTINEL_VALUE, config.getSentinelTtl());
                 }
             } else {
-                client.set(cacheKey, codec.toJson(value), config.getTtl());
+                client.set(cacheKey, codec.toJson(value), layerTtl(config, client));
             }
             result.put(id, value);
         }
@@ -290,10 +292,10 @@ public class FeatherCacheImpl implements FeatherCache {
     public void put(String key, Object value, CacheConfig config) {
         String cacheKey = namingStrategy.cacheKey(key);
         switch (config.getType()) {
-            case LOCAL_ONLY -> localCacheClient.set(cacheKey, codec.toJson(value), config.getTtl());
+            case LOCAL_ONLY -> localCacheClient.set(cacheKey, codec.toJson(value), config.getLocalTtl());
             case REDIS_ONLY -> redisCacheClient.set(cacheKey, codec.toJson(value), config.getTtl());
             case LOCAL_FIRST_THEN_REDIS -> {
-                localCacheClient.set(cacheKey, codec.toJson(value), config.getTtl());
+                localCacheClient.set(cacheKey, codec.toJson(value), config.getLocalTtl());
                 redisCacheClient.set(cacheKey, codec.toJson(value), config.getTtl());
             }
             default -> throw new IllegalArgumentException("不支持的缓存类型: " + config.getType());
@@ -318,5 +320,12 @@ public class FeatherCacheImpl implements FeatherCache {
 
     private CacheClient cacheClient(CacheConfig config) {
         return config.getType() == CacheType.LOCAL_ONLY ? localCacheClient : redisCacheClient;
+    }
+
+    /**
+     * 分层 TTL：本地层 {@code localTtl}（per-key 独立），Redis 层 {@code ttl}。
+     */
+    private java.time.Duration layerTtl(CacheConfig config, CacheClient client) {
+        return client == localCacheClient ? config.getLocalTtl() : config.getTtl();
     }
 }

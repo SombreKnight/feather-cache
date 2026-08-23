@@ -2,6 +2,7 @@ package io.github.sombreknight.feather.cache.cache.impl;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Expiry;
 import io.github.sombreknight.feather.cache.cache.CacheClient;
 
 import java.time.Duration;
@@ -11,8 +12,8 @@ import java.util.List;
 /**
  * 本地缓存客户端：Caffeine 进程内缓存。
  *
- * <p>定位为<b>短时效热点缓冲</b>：过期时间全局统一（默认 10s，可构造调整），
- * 不提供 per-key TTL——需要精细控制时效的数据请走 Redis 层。
+ * <p>支持 <b>per-key TTL</b>：每次 {@link #set(String, String, Duration)} 传入的 ttl
+ * 决定该 entry 的过期时间（Caffeine {@link Expiry} 实现），构造参数 ttl 仅作兜底默认。
  * 多实例部署下各实例本地缓存相互独立，无跨实例失效机制。</p>
  *
  * @author sombreknight
@@ -26,41 +27,75 @@ public class LocalCacheClient implements CacheClient {
     /** 默认过期时间：10 秒 */
     public static final Duration DEFAULT_TTL = Duration.ofSeconds(10);
 
-    private final Cache<String, String> cache;
+    private final Cache<String, LocalEntry> cache;
+    private final Duration defaultTtl;
 
     public LocalCacheClient() {
         this(DEFAULT_MAX_SIZE, DEFAULT_TTL);
     }
 
-    public LocalCacheClient(int maxSize, Duration ttl) {
+    public LocalCacheClient(int maxSize, Duration defaultTtl) {
+        this.defaultTtl = defaultTtl;
         this.cache = Caffeine.newBuilder()
                 .maximumSize(maxSize)
-                .expireAfterWrite(ttl)
+                .expireAfter(new Expiry<String, LocalEntry>() {
+                    @Override
+                    public long expireAfterCreate(String key, LocalEntry entry, long currentTime) {
+                        return entry.ttl.toNanos();
+                    }
+
+                    @Override
+                    public long expireAfterUpdate(String key, LocalEntry entry, long currentTime,
+                                                  long currentDuration) {
+                        // 覆盖写入时按新 ttl 重新计时
+                        return entry.ttl.toNanos();
+                    }
+
+                    @Override
+                    public long expireAfterRead(String key, LocalEntry entry, long currentTime,
+                                                long currentDuration) {
+                        // 读取不刷新过期时间
+                        return currentDuration;
+                    }
+                })
                 .build();
     }
 
     @Override
     public String get(String key) {
-        return cache.getIfPresent(key);
+        LocalEntry entry = cache.getIfPresent(key);
+        return entry == null ? null : entry.value;
     }
 
     @Override
     public List<String> mget(List<String> keys) {
         List<String> result = new ArrayList<>(keys.size());
         for (String key : keys) {
-            result.add(cache.getIfPresent(key));
+            LocalEntry entry = cache.getIfPresent(key);
+            result.add(entry == null ? null : entry.value);
         }
         return result;
     }
 
     @Override
     public void set(String key, String value, Duration ttl) {
-        // 本地缓存过期时间全局统一，忽略 per-key ttl
-        cache.put(key, value);
+        cache.put(key, new LocalEntry(value, ttl == null ? defaultTtl : ttl));
     }
 
     @Override
     public void delete(String key) {
         cache.invalidate(key);
+    }
+
+    /** 缓存条目：value + 该条目的独立过期时间 */
+    private static class LocalEntry {
+
+        final String value;
+        final Duration ttl;
+
+        LocalEntry(String value, Duration ttl) {
+            this.value = value;
+            this.ttl = ttl;
+        }
     }
 }

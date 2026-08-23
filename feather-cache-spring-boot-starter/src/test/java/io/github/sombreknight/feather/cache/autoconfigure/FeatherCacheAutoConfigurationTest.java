@@ -78,8 +78,8 @@ class FeatherCacheAutoConfigurationTest {
 
     @Test
     void localCacheTtlPropagatesFromProperties() throws InterruptedException {
-        // feather.cache.local.ttl=1s 已传导到 LocalCacheClient
-        localCacheClient.set("k", "v", Duration.ofMinutes(1));
+        // feather.cache.local.ttl=1s 已作为默认 TTL 传入 LocalCacheClient（set 不传 ttl 时生效）
+        localCacheClient.set("k", "v", null);
         assertThat(localCacheClient.get("k")).isEqualTo("v");
 
         Thread.sleep(1200);

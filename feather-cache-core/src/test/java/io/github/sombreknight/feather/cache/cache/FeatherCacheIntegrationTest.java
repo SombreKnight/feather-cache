@@ -42,6 +42,7 @@ class FeatherCacheIntegrationTest {
     private static final String REDIS_URL = System.getenv("REDIS_TEST_URL");
 
     private static StringRedisTemplate redisTemplate;
+    private static LocalCacheClient localCacheClient;
     private static FeatherCache cache;
 
     private final AtomicInteger loaderCalls = new AtomicInteger();
@@ -60,9 +61,10 @@ class FeatherCacheIntegrationTest {
         redisTemplate = new StringRedisTemplate(factory);
         redisTemplate.afterPropertiesSet();
 
+        localCacheClient = new LocalCacheClient();
         cache = new FeatherCacheImpl(
                 new NamingStrategy("test-app"),
-                new LocalCacheClient(),
+                localCacheClient,
                 new RedisCacheClient(new FeatherRedisClient(redisTemplate)),
                 new JsonCodec());
     }
@@ -244,6 +246,64 @@ class FeatherCacheIntegrationTest {
             return new Order(key, "loaded");
         });
         assertThat(second.name).isEqualTo("redis-data");
+    }
+
+    @Test
+    void multiCacheFullMissLoadsWithoutDeadlock() throws InterruptedException {
+        // 两层都 miss → 回源：本地层与 redis 层 semaphore 必须隔离，否则嵌套回源自锁
+        CacheConfig config = CacheConfig.multi();
+        int threads = 8;
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(threads);
+        AtomicInteger errors = new AtomicInteger();
+
+        for (int i = 0; i < threads; i++) {
+            new Thread(() -> {
+                try {
+                    start.await();
+                    Order order = cache.get("order:full-miss", ORDER_TYPE, config, key -> {
+                        loaderCalls.incrementAndGet();
+                        try { Thread.sleep(200); } catch (InterruptedException ignored) { }
+                        return new Order(key, "loaded");
+                    });
+                    if (order == null) errors.incrementAndGet();
+                } catch (Exception e) {
+                    errors.incrementAndGet();
+                } finally {
+                    done.countDown();
+                }
+            }).start();
+        }
+        start.countDown();
+        assertThat(done.await(10, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(errors).hasValue(0);
+        // 全部命中（redis 层单飞，只回源 1 次）
+        assertThat(loaderCalls).hasValue(1);
+    }
+
+    @Test
+    void multiCacheLocalTtlIsPerKeyControlled() throws InterruptedException {
+        CacheConfig config = CacheConfig.multi().localTtl(Duration.ofMillis(300));
+
+        Order order = cache.get("order:local-ttl", ORDER_TYPE, config,
+                key -> new Order(key, "v"));
+        assertThat(order.name).isEqualTo("v");
+
+        // 本地已回填
+        String localKey = new NamingStrategy("test-app").cacheKey("order:local-ttl");
+        assertThat(localCacheClient.get(localKey)).isNotNull();
+
+        Thread.sleep(400);
+
+        // 本地已按 localTtl(300ms) 过期（若 localTtl 未生效、本地沿用 redis 120s，此处仍会有值）
+        assertThat(localCacheClient.get(localKey)).isNull();
+
+        // redis 层（120s）仍在 → 第二次走 redis 命中，loader 不调；命中值回填本地
+        Order second = cache.get("order:local-ttl", ORDER_TYPE, config,
+                key -> { loaderCalls.incrementAndGet(); return new Order(key, "again"); });
+        assertThat(second.name).isEqualTo("v");
+        assertThat(loaderCalls).hasValue(0);
     }
 
     // ---------------------------------------------------------------- 降级
