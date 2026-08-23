@@ -52,6 +52,8 @@ public class DistributedLockService implements AutoCloseable {
     private final NamingStrategy namingStrategy;
     private final FeatherRedisClient redisClient;
     private final boolean enableWatchDog;
+    private final Duration defaultWait;
+    private final Duration defaultLockDuration;
     private final ScheduledExecutorService watchdogExecutor;
 
     /**
@@ -63,14 +65,21 @@ public class DistributedLockService implements AutoCloseable {
     private final AtomicInteger lockCounter = new AtomicInteger();
 
     public DistributedLockService(NamingStrategy namingStrategy, FeatherRedisClient redisClient) {
-        this(namingStrategy, redisClient, true);
+        this(namingStrategy, redisClient, true, DEFAULT_WAIT, DEFAULT_LOCK);
     }
 
     public DistributedLockService(NamingStrategy namingStrategy, FeatherRedisClient redisClient,
                                   boolean enableWatchDog) {
+        this(namingStrategy, redisClient, enableWatchDog, DEFAULT_WAIT, DEFAULT_LOCK);
+    }
+
+    public DistributedLockService(NamingStrategy namingStrategy, FeatherRedisClient redisClient,
+                                  boolean enableWatchDog, Duration defaultWait, Duration defaultLockDuration) {
         this.namingStrategy = namingStrategy;
         this.redisClient = redisClient;
         this.enableWatchDog = enableWatchDog;
+        this.defaultWait = defaultWait;
+        this.defaultLockDuration = defaultLockDuration;
         ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, runnable -> {
             Thread thread = new Thread(runnable, "feather-lock-watchdog");
             thread.setDaemon(true);
@@ -83,10 +92,11 @@ public class DistributedLockService implements AutoCloseable {
     // ---------------------------------------------------------------- lock
 
     /**
-     * 阻塞获取分布式锁（默认等 3s / 锁 30s），超时抛 {@link LockTimeoutException}。
+     * 阻塞获取分布式锁（默认等 3s / 锁 30s，可经 {@code feather.cache.lock.*} 配置），超时抛
+     * {@link LockTimeoutException}。
      */
     public FeatherLock lock(String key) {
-        return lock(key, DEFAULT_WAIT, DEFAULT_LOCK);
+        return lock(key, defaultWait, defaultLockDuration);
     }
 
     /**
@@ -122,7 +132,7 @@ public class DistributedLockService implements AutoCloseable {
      * 非阻塞获取分布式锁（拿不到立即返回 empty，不自旋）。
      */
     public Optional<FeatherLock> tryLock(String key) {
-        return tryLock(key, DEFAULT_LOCK);
+        return tryLock(key, defaultLockDuration);
     }
 
     /**
@@ -150,7 +160,7 @@ public class DistributedLockService implements AutoCloseable {
      * 锁内执行（try-with-resources 语法糖），拿不到锁抛 {@link LockTimeoutException}。
      */
     public void execute(String key, Runnable action) {
-        execute(key, DEFAULT_WAIT, DEFAULT_LOCK, () -> {
+        execute(key, defaultWait, defaultLockDuration, () -> {
             action.run();
             return null;
         });
@@ -160,7 +170,7 @@ public class DistributedLockService implements AutoCloseable {
      * 锁内执行并返回结果。
      */
     public <T> T execute(String key, java.util.concurrent.Callable<T> action) {
-        return execute(key, DEFAULT_WAIT, DEFAULT_LOCK, action);
+        return execute(key, defaultWait, defaultLockDuration, action);
     }
 
     /**

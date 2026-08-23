@@ -9,6 +9,7 @@ import io.github.sombreknight.feather.cache.lock.DistributedLockService;
 import io.github.sombreknight.feather.cache.redis.FeatherRedisClient;
 import io.github.sombreknight.feather.cache.support.JsonCodec;
 import io.github.sombreknight.feather.cache.support.NamingStrategy;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -65,21 +66,24 @@ public class FeatherCacheAutoConfiguration {
     }
 
     /**
-     * JSON 编解码，优先复用 Spring 的 ObjectMapper。
+     * JSON 编解码：优先复用 Spring 的 ObjectMapper（web 应用等）；
+     * 无则自建（starter 不强制依赖 spring-boot 本体，JacksonAutoConfiguration 未必生效）。
      */
     @Bean
     @ConditionalOnMissingBean
-    public JsonCodec featherJsonCodec(ObjectMapper objectMapper) {
-        return new JsonCodec(objectMapper);
+    public JsonCodec featherJsonCodec(ObjectProvider<ObjectMapper> objectMapperProvider) {
+        ObjectMapper mapper = objectMapperProvider.getIfAvailable();
+        return mapper == null ? new JsonCodec() : new JsonCodec(mapper);
     }
 
     /**
-     * 本地缓存客户端（Caffeine，默认 4096 条 / 10s 过期）。
+     * 本地缓存客户端（Caffeine，容量/过期可经 {@code feather.cache.local.*} 配置）。
      */
     @Bean
     @ConditionalOnMissingBean
-    public LocalCacheClient featherLocalCacheClient() {
-        return new LocalCacheClient();
+    public LocalCacheClient featherLocalCacheClient(FeatherCacheProperties properties) {
+        FeatherCacheProperties.Local local = properties.getLocal();
+        return new LocalCacheClient(local.getMaxSize(), local.getTtl());
     }
 
     /**
@@ -92,22 +96,28 @@ public class FeatherCacheAutoConfiguration {
     }
 
     /**
-     * 多级缓存服务。
+     * 多级缓存服务（重建许可数可经 {@code feather.cache.cache.single-flight-permits} 配置）。
      */
     @Bean
     @ConditionalOnMissingBean
     public FeatherCache featherCache(NamingStrategy namingStrategy, LocalCacheClient localCacheClient,
-                                     RedisCacheClient redisCacheClient, JsonCodec codec) {
-        return new FeatherCacheImpl(namingStrategy, localCacheClient, redisCacheClient, codec);
+                                     RedisCacheClient redisCacheClient, JsonCodec codec,
+                                     FeatherCacheProperties properties) {
+        return new FeatherCacheImpl(namingStrategy, localCacheClient, redisCacheClient, codec,
+                properties.getCache().getSingleFlightPermits(), 1024);
     }
 
     /**
-     * 分布式锁服务（AutoCloseable bean，容器销毁时自动关闭看门狗调度器）。
+     * 分布式锁服务（等待/锁时长/看门狗可经 {@code feather.cache.lock.*} 配置；
+     * AutoCloseable bean，容器销毁时自动关闭看门狗调度器）。
      */
     @Bean
     @ConditionalOnMissingBean
     public DistributedLockService distributedLockService(NamingStrategy namingStrategy,
-                                                         FeatherRedisClient redisClient) {
-        return new DistributedLockService(namingStrategy, redisClient);
+                                                         FeatherRedisClient redisClient,
+                                                         FeatherCacheProperties properties) {
+        FeatherCacheProperties.Lock lock = properties.getLock();
+        return new DistributedLockService(namingStrategy, redisClient,
+                lock.isEnableWatchDog(), lock.getDefaultWait(), lock.getDefaultLockDuration());
     }
 }
