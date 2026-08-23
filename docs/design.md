@@ -135,6 +135,17 @@ value 不匹配（锁已过期易主）→ 不做任何操作，**绝不误删�
 | 重入靠 ThreadLocal 魔法 | 锁对象 + 注册表计数，天然嵌套安全 |
 | 看门狗需全局跟踪持有者 | 续期任务绑定锁对象生命周期 |
 
+## 8.5 集群 / 哨兵支持（零代码）
+
+feather-cache 不感知部署形态——连接由 `spring.data.redis.*` 决定，单机/哨兵/集群/分片集群
+改配置即切换（Lettuce 自动拓扑发现与路由）。集群兼容性由代码结构保证：
+
+- 批量读用 **pipeline 逐 key get**（非原生 MGET）——key 跨 slot 无 CROSSSLOT，按 slot 自动路由
+- 锁 Lua 脚本**单 key**（KEYS[1]）——Cluster 要求脚本 keys 同 slot，单 key 天然满足
+- 集群故障转移窗口（主宕机未同步时的锁丢失）是单实例锁固有限制，非 Redlock 实现均存在
+
+> 实测：`RedisClusterIntegrationTest`（REDIS_CLUSTER_TEST_URL 启用，集群连接下的读写/pipeline/Lua 锁全过）
+
 ## 9. 异常与降级策略
 
 - **不吞异常**：底层 `DataAccessException` 统一转译 `FeatherCacheException` 抛出

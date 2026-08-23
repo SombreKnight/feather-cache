@@ -18,6 +18,8 @@
   try-with-resources 使用，杜绝锁泄漏与误删
 - **异常策略显式化**：Redis 故障 fail-fast 或显式降级（RETURN_NULL / FALLBACK_LOCAL），绝不静默吞异常
 - **零配置接入**：只需 `spring.data.redis.*` 连接配置，无额外连接工厂
+- **单机/集群/哨兵皆可**：连接形态由 Spring 配置决定，改配置即切换，零代码改动
+  （pipeline 逐 key get 无 CROSSSLOT，锁 Lua 单 key 天然兼容集群）
 
 ## 快速开始
 
