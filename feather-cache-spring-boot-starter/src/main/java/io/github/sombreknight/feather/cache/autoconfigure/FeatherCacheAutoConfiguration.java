@@ -1,6 +1,12 @@
 package io.github.sombreknight.feather.cache.autoconfigure;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.sombreknight.feather.cache.cache.FeatherCache;
+import io.github.sombreknight.feather.cache.cache.impl.FeatherCacheImpl;
+import io.github.sombreknight.feather.cache.cache.impl.LocalCacheClient;
+import io.github.sombreknight.feather.cache.cache.impl.RedisCacheClient;
 import io.github.sombreknight.feather.cache.redis.FeatherRedisClient;
+import io.github.sombreknight.feather.cache.support.JsonCodec;
 import io.github.sombreknight.feather.cache.support.NamingStrategy;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -55,5 +61,42 @@ public class FeatherCacheAutoConfiguration {
     @ConditionalOnMissingBean
     public FeatherRedisClient featherRedisClient(StringRedisTemplate redisTemplate) {
         return new FeatherRedisClient(redisTemplate);
+    }
+
+    /**
+     * JSON 编解码，优先复用 Spring 的 ObjectMapper。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public JsonCodec featherJsonCodec(ObjectMapper objectMapper) {
+        return new JsonCodec(objectMapper);
+    }
+
+    /**
+     * 本地缓存客户端（Caffeine，默认 4096 条 / 10s 过期）。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public LocalCacheClient featherLocalCacheClient() {
+        return new LocalCacheClient();
+    }
+
+    /**
+     * Redis 缓存客户端。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public RedisCacheClient featherRedisCacheClient(FeatherRedisClient redisClient) {
+        return new RedisCacheClient(redisClient);
+    }
+
+    /**
+     * 多级缓存服务。
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public FeatherCache featherCache(NamingStrategy namingStrategy, LocalCacheClient localCacheClient,
+                                     RedisCacheClient redisCacheClient, JsonCodec codec) {
+        return new FeatherCacheImpl(namingStrategy, localCacheClient, redisCacheClient, codec);
     }
 }
