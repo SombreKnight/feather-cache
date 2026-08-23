@@ -96,15 +96,13 @@ public class FeatherCacheAutoConfiguration {
     }
 
     /**
-     * 多级缓存服务（重建许可数可经 {@code feather.cache.cache.single-flight-permits} 配置）。
+     * 多级缓存服务（防击穿 single-flight 默认单飞，不开放配置）。
      */
     @Bean
     @ConditionalOnMissingBean
     public FeatherCache featherCache(NamingStrategy namingStrategy, LocalCacheClient localCacheClient,
-                                     RedisCacheClient redisCacheClient, JsonCodec codec,
-                                     FeatherCacheProperties properties) {
-        return new FeatherCacheImpl(namingStrategy, localCacheClient, redisCacheClient, codec,
-                properties.getCache().getSingleFlightPermits(), 1024);
+                                     RedisCacheClient redisCacheClient, JsonCodec codec) {
+        return new FeatherCacheImpl(namingStrategy, localCacheClient, redisCacheClient, codec);
     }
 
     /**

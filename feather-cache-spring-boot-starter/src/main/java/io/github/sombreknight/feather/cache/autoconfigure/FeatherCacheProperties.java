@@ -19,8 +19,6 @@ import java.time.Duration;
  *     local:
  *       max-size: 4096                # 本地缓存最大条目数
  *       ttl: 10s                      # 本地缓存过期（全局统一，无 per-key TTL）
- *     cache:
- *       single-flight-permits: 1      # 每 key 缓存重建许可数（1=单飞，防击穿）
  *     lock:
  *       default-wait: 3s              # lock() 默认等待超时
  *       default-lock-duration: 30s    # 锁默认时长（看门狗开启时自动续期）
@@ -49,11 +47,6 @@ public class FeatherCacheProperties {
     private final Local local = new Local();
 
     /**
-     * 缓存服务配置。
-     */
-    private final Cache cache = new Cache();
-
-    /**
      * 分布式锁配置。
      */
     private final Lock lock = new Lock();
@@ -76,10 +69,6 @@ public class FeatherCacheProperties {
 
     public Local getLocal() {
         return local;
-    }
-
-    public Cache getCache() {
-        return cache;
     }
 
     public Lock getLock() {
@@ -112,22 +101,6 @@ public class FeatherCacheProperties {
 
         public void setTtl(Duration ttl) {
             this.ttl = ttl;
-        }
-    }
-
-    public static class Cache {
-
-        /**
-         * 每 key 缓存重建许可数（1 = 单飞 single-flight，严格防击穿）。
-         */
-        private int singleFlightPermits = 1;
-
-        public int getSingleFlightPermits() {
-            return singleFlightPermits;
-        }
-
-        public void setSingleFlightPermits(int singleFlightPermits) {
-            this.singleFlightPermits = singleFlightPermits;
         }
     }
 

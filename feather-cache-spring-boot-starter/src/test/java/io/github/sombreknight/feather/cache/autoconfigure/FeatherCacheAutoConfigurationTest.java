@@ -25,7 +25,6 @@ import static org.assertj.core.api.Assertions.assertThat;
                 "spring.application.name=test-service",
                 "feather.cache.local.max-size=100",
                 "feather.cache.local.ttl=1s",
-                "feather.cache.cache.single-flight-permits=3",
                 "feather.cache.lock.default-wait=2s",
                 "feather.cache.lock.default-lock-duration=15s",
                 "feather.cache.lock.enable-watch-dog=false"
@@ -72,7 +71,6 @@ class FeatherCacheAutoConfigurationTest {
     void propertiesAreBound() {
         assertThat(properties.getLocal().getMaxSize()).isEqualTo(100);
         assertThat(properties.getLocal().getTtl()).isEqualTo(Duration.ofSeconds(1));
-        assertThat(properties.getCache().getSingleFlightPermits()).isEqualTo(3);
         assertThat(properties.getLock().getDefaultWait()).isEqualTo(Duration.ofSeconds(2));
         assertThat(properties.getLock().getDefaultLockDuration()).isEqualTo(Duration.ofSeconds(15));
         assertThat(properties.getLock().isEnableWatchDog()).isFalse();
