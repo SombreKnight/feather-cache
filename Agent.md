@@ -11,7 +11,7 @@
 | 仓库 | https://github.com/SombreKnight/feather-cache（默认分支 `main`） |
 | 包名 | `io.github.sombreknight.feather.cache` |
 | 坐标 | `io.github.sombreknight:feather-cache-spring-boot-starter` |
-| 版本 | 0.1.0（未发布） |
+| 版本 | 0.1.1（0.1.0 已发布） |
 | License | Apache 2.0 |
 | 技术栈 | Java 17、Spring Boot 3.5.x BOM、Spring Data Redis (Lettuce)、Caffeine、Jackson |
 | 设计哲学 | 干净、opinionated、极简配置；不重造连接层（复用 `spring.data.redis.*`）；锁走 Lua + 看门狗 |
