@@ -78,12 +78,12 @@ public class FeatherCacheProperties {
     public static class Local {
 
         /**
-         * 本地缓存最大条目数。
+         * 本地缓存最大条目数（超限按 LRU 淘汰最久未访问的条目）。
          */
         private int maxSize = LocalCacheClient.DEFAULT_MAX_SIZE;
 
         /**
-         * 本地缓存过期时间（全局统一）。
+         * 本地缓存过期时间（全局统一，无 per-key TTL；支持 10s / 5m / 1h 等格式）。
          */
         private Duration ttl = LocalCacheClient.DEFAULT_TTL;
 
@@ -107,17 +107,17 @@ public class FeatherCacheProperties {
     public static class Lock {
 
         /**
-         * lock() 默认等待超时。
+         * lock() 默认等待超时（支持 3s / 1m 等格式；超过则放弃获取锁）。
          */
         private Duration defaultWait = DistributedLockService.DEFAULT_WAIT;
 
         /**
-         * 锁默认时长（看门狗开启时自动续期）。
+         * 锁默认时长（超过自动过期释放；看门狗开启时自动续期，长任务不会提前释放）。
          */
         private Duration defaultLockDuration = DistributedLockService.DEFAULT_LOCK;
 
         /**
-         * 看门狗续期总开关。
+         * 看门狗续期总开关：开启后锁在默认时长内被自动续期，防止长任务持锁期间锁过期。
          */
         private boolean enableWatchDog = true;
 

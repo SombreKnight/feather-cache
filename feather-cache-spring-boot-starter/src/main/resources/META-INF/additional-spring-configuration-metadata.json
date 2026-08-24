@@ -1,0 +1,42 @@
+{
+  "groups": [
+    {
+      "name": "feather.cache.local",
+      "type": "io.github.sombreknight.feather.cache.autoconfigure.FeatherCacheProperties$Local",
+      "sourceType": "io.github.sombreknight.feather.cache.autoconfigure.FeatherCacheProperties$Local",
+      "description": "本地缓存配置（Caffeine，进程内）。"
+    },
+    {
+      "name": "feather.cache.lock",
+      "type": "io.github.sombreknight.feather.cache.autoconfigure.FeatherCacheProperties$Lock",
+      "sourceType": "io.github.sombreknight.feather.cache.autoconfigure.FeatherCacheProperties$Lock",
+      "description": "分布式锁配置（Redis 实现，可选看门狗自动续期）。"
+    }
+  ],
+  "properties": [
+    {
+      "name": "feather.cache.local.max-size",
+      "type": "java.lang.Integer",
+      "description": "本地缓存最大条目数（超限按 LRU 淘汰最久未访问的条目）。",
+      "defaultValue": 4096
+    },
+    {
+      "name": "feather.cache.local.ttl",
+      "type": "java.time.Duration",
+      "description": "本地缓存过期时间（全局统一，无 per-key TTL；支持 10s / 5m / 1h 等格式）。",
+      "defaultValue": "10s"
+    },
+    {
+      "name": "feather.cache.lock.default-wait",
+      "type": "java.time.Duration",
+      "description": "lock() 默认等待超时（支持 3s / 1m 等格式；超过则放弃获取锁）。",
+      "defaultValue": "3s"
+    },
+    {
+      "name": "feather.cache.lock.default-lock-duration",
+      "type": "java.time.Duration",
+      "description": "锁默认时长（超过自动过期释放；看门狗开启时自动续期，长任务不会提前释放）。",
+      "defaultValue": "30s"
+    }
+  ]
+}
