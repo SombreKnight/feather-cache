@@ -27,7 +27,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class DistributedLockServiceIntegrationTest {
 
-    private static final String REDIS_URL = System.getenv("REDIS_TEST_URL");
+    private static final String REDIS_URL = defaultRedisUrl();
+
+    /** REDIS_TEST_URL 显式配置优先，默认回退本地 6379（避免集成测试被静默跳过） */
+    private static String defaultRedisUrl() {
+        String env = System.getenv("REDIS_TEST_URL");
+        return env != null && !env.trim().isEmpty() ? env : "redis://localhost:6379";
+    }
 
     private static FeatherRedisConnectionFactory connectionFactory;
     private static FeatherRedisClient redisClient;
@@ -258,10 +264,9 @@ class DistributedLockServiceIntegrationTest {
     // ---------------------------------------------------------------- 看门狗边界（P0）
 
     /**
-     * P0 缺陷复现：锁时长 &lt;1s 时 {@code setIfAbsent} 与看门狗都用 {@code ttl.toSeconds()}，
-     * 0 秒 TTL 使 Redis 拒绝加锁（ERR invalid expire time）。修复（毫秒 PX 或入参校验）后启用。
+     * P0 缺陷修复验证：锁时长 &lt;1s 时加锁与看门狗均用毫秒（PX/PEXPIRE），
+     * 500ms 锁应保持互斥（修复前 Redis 拒绝 EX 0 直接报错）。
      */
-    @org.junit.jupiter.api.Disabled("P0 缺陷：锁时长<1s 加锁直接失败；见 QA issues.md")
     @Test
     void subSecondLockDurationKeepsMutualExclusion() throws Exception {
         try (FeatherLock ignored = lockService.lock("it.subsecond", Duration.ofSeconds(3), Duration.ofMillis(500))) {

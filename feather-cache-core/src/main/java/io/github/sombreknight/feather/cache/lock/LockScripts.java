@@ -32,11 +32,11 @@ public final class LockScripts {
      * 原子续期（看门狗）：
      * 仅当 key 的当前值等于持有者 value 时才续期，否则返回 0（锁已易主/过期，停止续期）。
      *
-     * <p>KEYS[1] = lockKey，ARGV[1] = value，ARGV[2] = 续期秒数</p>
+     * <p>KEYS[1] = lockKey，ARGV[1] = value，ARGV[2] = 续期毫秒数（PEXPIRE 支持亚秒级锁）</p>
      */
     public static final String RENEW = """
             if redis.call('get', KEYS[1]) == ARGV[1] then
-                return redis.call('expire', KEYS[1], ARGV[2])
+                return redis.call('pexpire', KEYS[1], ARGV[2])
             else
                 return 0
             end

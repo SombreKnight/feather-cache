@@ -21,7 +21,13 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class FeatherRedisClientIntegrationTest {
 
-    private static final String REDIS_URL = System.getenv("REDIS_TEST_URL");
+    private static final String REDIS_URL = defaultRedisUrl();
+
+    /** REDIS_TEST_URL 显式配置优先，默认回退本地 6379（避免集成测试被静默跳过） */
+    private static String defaultRedisUrl() {
+        String env = System.getenv("REDIS_TEST_URL");
+        return env != null && !env.trim().isEmpty() ? env : "redis://localhost:6379";
+    }
 
     private static FeatherRedisConnectionFactory connectionFactory;
     private static FeatherRedisClient client;

@@ -86,14 +86,14 @@ public class FeatherRedisClient {
     }
 
     /**
-     * 写入缓存（覆盖），带过期时间。
+     * 写入缓存（覆盖），带过期时间。毫秒精度（PX），支持亚秒级 TTL。
      */
     public void set(String key, String value, Duration ttl) {
         execute(() -> {
             if (isCluster()) {
-                clusterCommands().set(key, value, SetArgs.Builder.ex(ttl.toSeconds()));
+                clusterCommands().set(key, value, SetArgs.Builder.px(ttl.toMillis()));
             } else {
-                commands().set(key, value, SetArgs.Builder.ex(ttl.toSeconds()));
+                commands().set(key, value, SetArgs.Builder.px(ttl.toMillis()));
             }
             return null;
         });
@@ -105,10 +105,11 @@ public class FeatherRedisClient {
      * @return 写入成功返回 true，key 已存在返回 false
      */
     public boolean setIfAbsent(String key, String value, Duration ttl) {
-        // lettuce SET 返回 "OK"；NX 未写入（key 已存在）时返回 null
+        // lettuce SET 返回 "OK"；NX 未写入（key 已存在）时返回 null。
+        // 用毫秒 PX：支持亚秒级 TTL（toSeconds() 对 <1s 会取整为 0 导致锁立即失效）
         String result = execute(() -> isCluster()
-                ? clusterCommands().set(key, value, SetArgs.Builder.nx().ex(ttl.toSeconds()))
-                : commands().set(key, value, SetArgs.Builder.nx().ex(ttl.toSeconds())));
+                ? clusterCommands().set(key, value, SetArgs.Builder.nx().px(ttl.toMillis()))
+                : commands().set(key, value, SetArgs.Builder.nx().px(ttl.toMillis())));
         return "OK".equals(result);
     }
 
@@ -147,12 +148,12 @@ public class FeatherRedisClient {
     }
 
     /**
-     * 设置过期时间。
+     * 设置过期时间。毫秒精度（PEXPIRE），支持亚秒级 TTL。
      */
     public boolean expire(String key, Duration ttl) {
         Boolean result = execute(() -> isCluster()
-                ? clusterCommands().expire(key, ttl.toSeconds())
-                : commands().expire(key, ttl.toSeconds()));
+                ? clusterCommands().pexpire(key, ttl.toMillis())
+                : commands().pexpire(key, ttl.toMillis()));
         return Boolean.TRUE.equals(result);
     }
 

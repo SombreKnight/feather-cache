@@ -201,11 +201,12 @@ public class DistributedLockService implements AutoCloseable {
 
     /**
      * 看门狗续期（RedisFeatherLock 定时调用；Lua compare-and-expire，锁已易主则停止）。
+     * 使用毫秒（PEXPIRE），支持亚秒级锁时长。
      */
     void renew(String lockKey, String value, Duration lockDuration) {
         try {
             redisClient.evalInteger(LockScripts.RENEW, List.of(lockKey),
-                    List.of(value, String.valueOf(lockDuration.toSeconds())));
+                    List.of(value, String.valueOf(lockDuration.toMillis())));
         } catch (Exception e) {
             log.warn("看门狗续期失败，lockKey={}, 原因: {}", lockKey, e.getMessage());
         }

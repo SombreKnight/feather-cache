@@ -38,7 +38,13 @@ class FeatherCacheIntegrationTest {
 
     private static final TypeReference<Order> ORDER_TYPE = new TypeReference<>() {};
 
-    private static final String REDIS_URL = System.getenv("REDIS_TEST_URL");
+    private static final String REDIS_URL = defaultRedisUrl();
+
+    /** REDIS_TEST_URL 显式配置优先，默认回退本地 6379（避免集成测试被静默跳过） */
+    private static String defaultRedisUrl() {
+        String env = System.getenv("REDIS_TEST_URL");
+        return env != null && !env.trim().isEmpty() ? env : "redis://localhost:6379";
+    }
 
     private static FeatherRedisConnectionFactory connectionFactory;
     private static LocalCacheClient localCacheClient;
@@ -451,10 +457,9 @@ class FeatherCacheIntegrationTest {
     }
 
     /**
-     * P1 缺陷复现：批量 gets 的 loader 回源无 single-flight 保护（8 并发全量回源=8 次，
-     * 单键 get 是 1 次）。修复（批量路径加信号量）后启用。
+     * P1 缺陷修复验证：批量 gets 的 loader 回源受 single-flight 保护（
+     * 8 并发同组 miss 不应重复回源；修复前 8 次全量回源）。
      */
-    @org.junit.jupiter.api.Disabled("P1 缺陷：批量 gets 无 single-flight 防击穿；见 QA issues.md")
     @Test
     void concurrentGetsSingleFlightLoadsEachMissingKeyOnce() throws Exception {
         List<String> ids = List.of("order:x1", "order:x2");

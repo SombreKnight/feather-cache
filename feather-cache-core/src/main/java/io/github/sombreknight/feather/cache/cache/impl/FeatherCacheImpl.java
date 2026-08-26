@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 多级缓存核心实现。
@@ -249,21 +250,51 @@ public class FeatherCacheImpl implements FeatherCache {
             return result;
         }
 
-        // 回源
-        Map<K, T> loaded = loader.loads(missingIds);
-        for (K id : missingIds) {
-            T value = loaded.get(id);
-            String cacheKey = namingStrategy.cacheKey(keyGenerator.apply(id));
-            if (value == null) {
-                if (config.isCacheNull()) {
-                    client.set(namingStrategy.sentinelKey(keyGenerator.apply(id)), SENTINEL_VALUE, config.getSentinelTtl());
-                }
-            } else {
-                client.set(cacheKey, codec.toJson(value), layerTtl(config, client));
-            }
-            result.put(id, value);
+        // 批量 single-flight：同组 missingIds 只回源一次，防并发回源风暴（与单键 get 的保护对齐）
+        List<String> missingCacheKeys = missingIds.stream()
+                .map(id -> namingStrategy.cacheKey(keyGenerator.apply(id)))
+                .toList();
+        String flightKey = "batch:" + missingCacheKeys.stream().sorted().collect(Collectors.joining("|"));
+        Semaphore semaphore = semaphoreCache.get(flightKey, k -> new Semaphore(singleFlightPermits));
+        try {
+            semaphore.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new FeatherCacheException("等待批量缓存重建许可被中断: " + flightKey, e);
         }
-        return result;
+        try {
+            // 双重检查：许可内重查，已被其他线程回填的跳过
+            List<String> recheck = client.mget(missingCacheKeys);
+            Iterator<K> iter = missingIds.iterator();
+            for (int i = 0; iter.hasNext(); i++) {
+                K id = iter.next();
+                String value = recheck.get(i);
+                if (value != null) {
+                    result.put(id, codec.toObject(value, type));
+                    iter.remove();
+                }
+            }
+            if (missingIds.isEmpty()) {
+                return result;
+            }
+            // 回源
+            Map<K, T> loaded = loader.loads(missingIds);
+            for (K id : missingIds) {
+                T value = loaded.get(id);
+                String cacheKey = namingStrategy.cacheKey(keyGenerator.apply(id));
+                if (value == null) {
+                    if (config.isCacheNull()) {
+                        client.set(namingStrategy.sentinelKey(keyGenerator.apply(id)), SENTINEL_VALUE, config.getSentinelTtl());
+                    }
+                } else {
+                    client.set(cacheKey, codec.toJson(value), layerTtl(config, client));
+                }
+                result.put(id, value);
+            }
+            return result;
+        } finally {
+            semaphore.release();
+        }
     }
 
     private <K, T> Map<K, T> handleGetsFailure(List<K> ids, Function<K, String> keyGenerator,
