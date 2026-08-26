@@ -1,14 +1,15 @@
 # Feather Cache 设计文档
 
-> 记录 v0.1.0 的关键设计决策与取舍。为什么这么设计、不做什么、留了什么逃生舱。
+> 记录 v0.1.0 起的关键设计决策与取舍（v1.0.0：连接自闭环 + 配置归一化）。为什么这么设计、不做什么、留了什么逃生舱。
 > 使用文档见 [usage.md](../usage.md)。
 
 ## 1. 定位
 
-对标 feather-orm / feather-rmq：**干净、opinionated、极简配置**。基于 Spring Data Redis
-做**多级缓存 + 分布式锁**两件事，不重造连接层、不引入 Redisson 等重量级依赖。
+对标 feather-orm / feather-rmq：**干净、opinionated、极简配置**。基于 Lettuce 自建连接做
+**多级缓存 + 分布式锁**两件事，连接自闭环（不依赖 Spring Data Redis）、不引入 Redisson 等重量级依赖。
 
-- 连接完全复用 `spring.data.redis.*`（Lettuce），**零额外连接配置**
+- 连接自闭环：`feather.cache.redis.*` 一套配置（lettuce 自建，standalone/sentinel/cluster），
+  Redis 不可达时应用可正常启动并按 `CacheReadMode` 降级
 - 防击穿 / 防穿透 / 批量回源开箱即用，默认值即最佳实践
 - 锁走 Lua 原子 + 看门狗续期，try-with-resources 使用
 
@@ -18,7 +19,7 @@ feather-cache 从 common-sdk 抽出 redis/cache/lock 三块重建，**去其糟�
 
 | 旧设计（历史包袱） | feather-cache 的处理 |
 |---|---|
-| Jedis 2.9 + 手写连接池 + `returnResource` | Spring Data Redis (Lettuce) 托管连接 |
+| Jedis 2.9 + 手写连接池 + `returnResource` | Lettuce 自建连接（`feather.cache.redis.*` 自闭环） |
 | `executeWithPool` 无差别吞异常返回 null（Redis 挂 → 静默打穿 DB） | `CacheReadMode` 显式降级：FAIL_FAST / RETURN_NULL / FALLBACK_LOCAL |
 | unLock `get`+`del` 两步非原子（误删窗口） | Lua compare-and-delete 原子释放 |
 | 无看门狗，长任务锁自动过期 | 看门狗按 `lockDuration/3` 续期，close 即停 |
@@ -26,7 +27,7 @@ feather-cache 从 common-sdk 抽出 redis/cache/lock 三块重建，**去其糟�
 | `tryLock` 失败白 sleep 50ms | 单次 SET NX 立即返回 |
 | 批量 get 循环单查非 pipeline | mget 走 pipeline 单次往返 |
 | `NULL_VALUE = "@@NULL@@"` 字符串可能碰撞 | 独立 sentinel scope key，与业务数据空间隔离 |
-| 本地缓存 10s/4096 写死且与配置脱节 | 容量/默认 TTL 可配 + **per-key TTL**（Caffeine Expiry） |
+| 本地缓存 10s/4096 写死且与配置脱节 | 容量可配（`feather.cache.local.max-size`）+ **per-key TTL**（Caffeine Expiry，每 key 独立时效） |
 | `Semaphore(10)` 掩盖嵌套回源死锁 | 每 key 单飞（1 许可）且按层隔离，并发测试覆盖 |
 | `CacheKeyHolder` 死代码、魔法值遍地 | 全部删除 / 配置化 |
 | Spring Boot 2.0.3 + javax | Spring Boot 3.5.x + jakarta + JDK 17 |
@@ -137,18 +138,19 @@ value 不匹配（锁已过期易主）→ 不做任何操作，**绝不误删�
 
 ## 8.5 集群 / 哨兵支持（零代码）
 
-feather-cache 不感知部署形态——连接由 `spring.data.redis.*` 决定，单机/哨兵/集群/分片集群
+feather-cache 按 `feather.cache.redis.mode` 选择部署形态，单机/哨兵/集群/分片集群
 改配置即切换（Lettuce 自动拓扑发现与路由）。集群兼容性由代码结构保证：
 
-- 批量读用 **pipeline 逐 key get**（非原生 MGET）——key 跨 slot 无 CROSSSLOT，按 slot 自动路由
+- 批量读：单机/哨兵走**原生 MGET**（单次往返）；集群走**逐 key get**（Lettuce 多路复用即流水线）
+  ——key 跨 slot 无 CROSSSLOT，按 slot 自动路由
 - 锁 Lua 脚本**单 key**（KEYS[1]）——Cluster 要求脚本 keys 同 slot，单 key 天然满足
 - 集群故障转移窗口（主宕机未同步时的锁丢失）是单实例锁固有限制，非 Redlock 实现均存在
 
-> 实测：`RedisClusterIntegrationTest`（REDIS_CLUSTER_TEST_URL 启用，集群连接下的读写/pipeline/Lua 锁全过）
+> 实测：`RedisClusterIntegrationTest`（REDIS_CLUSTER_TEST_URL 启用，集群连接下的读写/mget/逐 key/Lua 锁全过）
 
 ## 9. 异常与降级策略
 
-- **不吞异常**：底层 `DataAccessException` 统一转译 `FeatherCacheException` 抛出
+- **不吞异常**：底层 `RedisException` 统一转译 `FeatherCacheException` 抛出
 - 缓存读取故障按 `CacheReadMode` 显式降级（见 usage 2.6）
 - 锁获取失败抛 `LockTimeoutException`（带 key + wait，可捕获走降级逻辑）
 

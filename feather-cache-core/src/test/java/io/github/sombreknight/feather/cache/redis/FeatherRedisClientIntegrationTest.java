@@ -4,9 +4,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.net.URI;
 import java.time.Duration;
@@ -26,7 +23,7 @@ class FeatherRedisClientIntegrationTest {
 
     private static final String REDIS_URL = System.getenv("REDIS_TEST_URL");
 
-    private static StringRedisTemplate redisTemplate;
+    private static FeatherRedisConnectionFactory connectionFactory;
     private static FeatherRedisClient client;
 
     @BeforeAll
@@ -35,27 +32,24 @@ class FeatherRedisClientIntegrationTest {
                 "未配置 REDIS_TEST_URL，跳过 Redis 集成测试（CI 服务容器会自动启用）");
 
         URI uri = URI.create(REDIS_URL);
-        RedisStandaloneConfiguration config = new RedisStandaloneConfiguration(uri.getHost(), uri.getPort());
-        LettuceConnectionFactory factory = new LettuceConnectionFactory(config);
-        factory.afterPropertiesSet();
-
-        redisTemplate = new StringRedisTemplate(factory);
-        redisTemplate.afterPropertiesSet();
-
-        client = new FeatherRedisClient(redisTemplate);
+        connectionFactory = new FeatherRedisConnectionFactory(RedisConnectionConfig.builder()
+                .host(uri.getHost())
+                .port(uri.getPort())
+                .build());
+        client = new FeatherRedisClient(connectionFactory);
     }
 
     @AfterAll
     static void destroy() {
-        if (redisTemplate != null) {
-            redisTemplate.getConnectionFactory().getConnection().close();
+        if (connectionFactory != null) {
+            connectionFactory.close();
         }
     }
 
     @BeforeEach
     void cleanUp() {
         assumeTrue(REDIS_URL != null && !REDIS_URL.trim().isEmpty(), "跳过");
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        connectionFactory.flushAll();
     }
 
     @Test

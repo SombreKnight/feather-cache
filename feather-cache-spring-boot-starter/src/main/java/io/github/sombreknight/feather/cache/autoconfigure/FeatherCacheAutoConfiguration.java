@@ -7,8 +7,11 @@ import io.github.sombreknight.feather.cache.cache.impl.LocalCacheClient;
 import io.github.sombreknight.feather.cache.cache.impl.RedisCacheClient;
 import io.github.sombreknight.feather.cache.lock.DistributedLockService;
 import io.github.sombreknight.feather.cache.redis.FeatherRedisClient;
+import io.github.sombreknight.feather.cache.redis.FeatherRedisConnectionFactory;
+import io.github.sombreknight.feather.cache.redis.RedisConnectionConfig;
 import io.github.sombreknight.feather.cache.support.JsonCodec;
 import io.github.sombreknight.feather.cache.support.NamingStrategy;
+import io.lettuce.core.RedisClient;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -17,28 +20,32 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * feather-cache 自动配置。
  *
- * <p>当配置 {@code feather.cache.enabled=true}（默认）时，基于用户已有的
- * {@code spring.data.redis.*} 连接（Spring Data Redis / Lettuce），装配：
+ * <p>当配置 {@code feather.cache.enabled=true}（默认）时，基于 lettuce 自建 Redis 连接
+ * （配置统一收在 {@code feather.cache.redis.*}），装配：
  * <ul>
- *     <li>{@code NamingStrategy}：key 命名单一事实源（M1）</li>
- *     <li>{@code FeatherRedisClient}：Redis 薄封装（M1）</li>
- *     <li>{@code FeatherCache}：多级缓存服务（M2）</li>
- *     <li>{@code DistributedLockService}：分布式锁（M3）</li>
+ *     <li>{@code FeatherRedisConnectionFactory}：lettuce 连接工厂（standalone/sentinel/cluster）</li>
+ *     <li>{@code NamingStrategy}：key 命名单一事实源</li>
+ *     <li>{@code FeatherRedisClient}：Redis 薄封装</li>
+ *     <li>{@code FeatherCache}：多级缓存服务</li>
+ *     <li>{@code DistributedLockService}：分布式锁</li>
  * </ul>
- * 不创建任何 Redis 连接工厂——直接复用 Spring Boot 的 RedisAutoConfiguration。</p>
+ * 不依赖 Spring Data Redis / {@code spring.data.redis.*}，连接生命周期由本配置管理
+ * （容器销毁时自动关闭）。</p>
  *
  * @author sombreknight
- * @since 0.1.0
+ * @since 1.0.0
  */
 @AutoConfiguration
 @EnableConfigurationProperties(FeatherCacheProperties.class)
-@ConditionalOnClass(StringRedisTemplate.class)
+@ConditionalOnClass(RedisClient.class)
 @ConditionalOnProperty(prefix = "feather.cache", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class FeatherCacheAutoConfiguration {
 
@@ -57,12 +64,45 @@ public class FeatherCacheAutoConfiguration {
     }
 
     /**
-     * Redis 薄封装（StringRedisTemplate 由 Spring Boot RedisAutoConfiguration 提供）。
+     * Redis 连接工厂（lettuce 自建，配置收口 {@code feather.cache.redis.*}；
+     * 容器销毁时自动关闭连接与客户端）。
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean
+    public FeatherRedisConnectionFactory featherRedisConnectionFactory(FeatherCacheProperties properties) {
+        FeatherCacheProperties.Redis redis = properties.getRedis();
+        RedisConnectionConfig.Builder builder = RedisConnectionConfig.builder()
+                .mode(redis.getMode())
+                .host(redis.getHost())
+                .port(redis.getPort())
+                .password(redis.getPassword())
+                .database(redis.getDatabase())
+                .ssl(redis.isSsl())
+                .timeout(redis.getTimeout());
+        if (StringUtils.hasText(redis.getCluster().getNodes())) {
+            builder.clusterNodes(splitNodes(redis.getCluster().getNodes()));
+        }
+        if (StringUtils.hasText(redis.getSentinel().getNodes())) {
+            builder.sentinelNodes(splitNodes(redis.getSentinel().getNodes()));
+            builder.sentinelMaster(redis.getSentinel().getMaster());
+        }
+        return new FeatherRedisConnectionFactory(builder.build());
+    }
+
+    private List<String> splitNodes(String nodes) {
+        return Arrays.stream(nodes.split(","))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .toList();
+    }
+
+    /**
+     * Redis 薄封装（连接由 {@link FeatherRedisConnectionFactory} 管理）。
      */
     @Bean
     @ConditionalOnMissingBean
-    public FeatherRedisClient featherRedisClient(StringRedisTemplate redisTemplate) {
-        return new FeatherRedisClient(redisTemplate);
+    public FeatherRedisClient featherRedisClient(FeatherRedisConnectionFactory factory) {
+        return new FeatherRedisClient(factory);
     }
 
     /**
@@ -77,13 +117,13 @@ public class FeatherCacheAutoConfiguration {
     }
 
     /**
-     * 本地缓存客户端（Caffeine，容量/过期可经 {@code feather.cache.local.*} 配置）。
+     * 本地缓存客户端（Caffeine，容量可经 {@code feather.cache.local.max-size} 配置；
+     * 过期时间由调用方 per-key TTL 传入）。
      */
     @Bean
     @ConditionalOnMissingBean
     public LocalCacheClient featherLocalCacheClient(FeatherCacheProperties properties) {
-        FeatherCacheProperties.Local local = properties.getLocal();
-        return new LocalCacheClient(local.getMaxSize(), local.getTtl());
+        return new LocalCacheClient(properties.getLocal().getMaxSize(), LocalCacheClient.DEFAULT_TTL);
     }
 
     /**

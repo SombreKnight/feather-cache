@@ -6,15 +6,14 @@ import io.github.sombreknight.feather.cache.cache.impl.LocalCacheClient;
 import io.github.sombreknight.feather.cache.cache.impl.RedisCacheClient;
 import io.github.sombreknight.feather.cache.exception.FeatherCacheException;
 import io.github.sombreknight.feather.cache.redis.FeatherRedisClient;
+import io.github.sombreknight.feather.cache.redis.FeatherRedisConnectionFactory;
+import io.github.sombreknight.feather.cache.redis.RedisConnectionConfig;
 import io.github.sombreknight.feather.cache.support.JsonCodec;
 import io.github.sombreknight.feather.cache.support.NamingStrategy;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.net.URI;
 import java.time.Duration;
@@ -41,7 +40,7 @@ class FeatherCacheIntegrationTest {
 
     private static final String REDIS_URL = System.getenv("REDIS_TEST_URL");
 
-    private static StringRedisTemplate redisTemplate;
+    private static FeatherRedisConnectionFactory connectionFactory;
     private static LocalCacheClient localCacheClient;
     private static FeatherCache cache;
 
@@ -54,32 +53,30 @@ class FeatherCacheIntegrationTest {
                 "未配置 REDIS_TEST_URL，跳过缓存集成测试");
 
         URI uri = URI.create(REDIS_URL);
-        LettuceConnectionFactory factory = new LettuceConnectionFactory(
-                new RedisStandaloneConfiguration(uri.getHost(), uri.getPort()));
-        factory.afterPropertiesSet();
-
-        redisTemplate = new StringRedisTemplate(factory);
-        redisTemplate.afterPropertiesSet();
+        connectionFactory = new FeatherRedisConnectionFactory(RedisConnectionConfig.builder()
+                .host(uri.getHost())
+                .port(uri.getPort())
+                .build());
 
         localCacheClient = new LocalCacheClient();
         cache = new FeatherCacheImpl(
                 new NamingStrategy("test-app"),
                 localCacheClient,
-                new RedisCacheClient(new FeatherRedisClient(redisTemplate)),
+                new RedisCacheClient(new FeatherRedisClient(connectionFactory)),
                 new JsonCodec());
     }
 
     @AfterAll
     static void destroy() {
-        if (redisTemplate != null) {
-            redisTemplate.getConnectionFactory().getConnection().close();
+        if (connectionFactory != null) {
+            connectionFactory.close();
         }
     }
 
     @BeforeEach
     void cleanUp() {
         assumeTrue(REDIS_URL != null && !REDIS_URL.trim().isEmpty(), "跳过");
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        connectionFactory.flushAll();
         loaderCalls.set(0);
         multiLoaderCalls.set(0);
     }
@@ -348,18 +345,17 @@ class FeatherCacheIntegrationTest {
 
     /** 构造一个指向不可达端口的缓存（模拟 Redis 故障） */
     private FeatherCache buildCacheAgainstDownRedis() {
-        LettuceConnectionFactory deadFactory = new LettuceConnectionFactory(
-                new RedisStandaloneConfiguration("127.0.0.1", 65534));
-        deadFactory.setTimeout(500L);
-        deadFactory.afterPropertiesSet();
-
-        StringRedisTemplate deadTemplate = new StringRedisTemplate(deadFactory);
-        deadTemplate.afterPropertiesSet();
+        FeatherRedisConnectionFactory deadFactory = new FeatherRedisConnectionFactory(
+                RedisConnectionConfig.builder()
+                        .host("127.0.0.1")
+                        .port(65534)
+                        .timeout(Duration.ofMillis(500))
+                        .build());
 
         return new FeatherCacheImpl(
                 new NamingStrategy("test-app"),
                 new LocalCacheClient(),
-                new RedisCacheClient(new FeatherRedisClient(deadTemplate)),
+                new RedisCacheClient(new FeatherRedisClient(deadFactory)),
                 new JsonCodec());
     }
 

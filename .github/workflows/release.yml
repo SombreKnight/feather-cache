@@ -1,6 +1,6 @@
 name: Release to Maven Central
 
-# 触发方式：推送 v* 格式的 tag，如 git tag v0.1.0 && git push origin v0.1.0
+# 触发方式：推送 v* 格式的 tag，如 git tag v1.0.0 && git push origin v1.0.0
 on:
   push:
     tags:

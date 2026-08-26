@@ -3,15 +3,15 @@ package io.github.sombreknight.feather.cache.redis;
 import io.github.sombreknight.feather.cache.lock.DistributedLockService;
 import io.github.sombreknight.feather.cache.lock.FeatherLock;
 import io.github.sombreknight.feather.cache.support.NamingStrategy;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.connection.RedisClusterConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -23,14 +23,14 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * Redis 集群模式集成测试（3 主 0 从最小集群）。
  *
  * <p>需要环境变量 {@code REDIS_CLUSTER_TEST_URL}（如 {@code 127.0.0.1:7001,127.0.0.1:7002,127.0.0.1:7003}），
- * 未配置自动跳过。验证集群下的三条关键路径：跨节点读写、pipeline mget（无 CROSSSLOT）、
+ * 未配置自动跳过。验证集群下的三条关键路径：跨节点读写、mget 逐 key（无 CROSSSLOT）、
  * 单 key Lua 锁（天然同 slot）。</p>
  */
 class RedisClusterIntegrationTest {
 
     private static final String CLUSTER_URL = System.getenv("REDIS_CLUSTER_TEST_URL");
 
-    private static StringRedisTemplate redisTemplate;
+    private static FeatherRedisConnectionFactory connectionFactory;
     private static FeatherRedisClient client;
     private static DistributedLockService lockService;
 
@@ -39,25 +39,22 @@ class RedisClusterIntegrationTest {
         assumeTrue(CLUSTER_URL != null && !CLUSTER_URL.trim().isEmpty(),
                 "未配置 REDIS_CLUSTER_TEST_URL，跳过集群集成测试");
 
-        RedisClusterConfiguration clusterConfig = new RedisClusterConfiguration();
+        List<String> nodes = new ArrayList<>();
         for (String node : CLUSTER_URL.split(",")) {
-            String[] parts = node.trim().split(":");
-            clusterConfig.clusterNode(parts[0], Integer.parseInt(parts[1]));
+            nodes.add(node.trim());
         }
-        LettuceConnectionFactory factory = new LettuceConnectionFactory(clusterConfig);
-        factory.afterPropertiesSet();
-
-        redisTemplate = new StringRedisTemplate(factory);
-        redisTemplate.afterPropertiesSet();
-
-        client = new FeatherRedisClient(redisTemplate);
+        connectionFactory = new FeatherRedisConnectionFactory(RedisConnectionConfig.builder()
+                .mode(RedisConnectionConfig.Mode.CLUSTER)
+                .clusterNodes(nodes)
+                .build());
+        client = new FeatherRedisClient(connectionFactory);
         lockService = new DistributedLockService(new NamingStrategy("cluster-test"), client);
     }
 
     @AfterAll
     static void destroy() {
-        if (redisTemplate != null) {
-            redisTemplate.getConnectionFactory().getConnection().close();
+        if (connectionFactory != null) {
+            connectionFactory.close();
         }
         if (lockService != null) {
             lockService.close();
@@ -69,8 +66,10 @@ class RedisClusterIntegrationTest {
         assumeTrue(CLUSTER_URL != null && !CLUSTER_URL.trim().isEmpty(), "跳过");
         for (String node : CLUSTER_URL.split(",")) {
             // 集群模式无法 flushAll 所有节点，逐节点清理本测试用 key
-            try {
-                redisTemplate.getConnectionFactory().getConnection().serverCommands().flushDb();
+            String[] parts = node.trim().split(":");
+            try (RedisClient perNode = RedisClient.create(
+                    RedisURI.builder().withHost(parts[0]).withPort(Integer.parseInt(parts[1])).build())) {
+                perNode.connect().sync().flushdb();
             } catch (Exception ignored) {
             }
         }

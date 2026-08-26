@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -203,12 +204,8 @@ public class DistributedLockService implements AutoCloseable {
      */
     void renew(String lockKey, String value, Duration lockDuration) {
         try {
-            redisClient.execute(connection ->
-                    connection.eval(LockScripts.RENEW.getBytes(),
-                            org.springframework.data.redis.connection.ReturnType.INTEGER, 1,
-                            lockKey.getBytes(),
-                            value.getBytes(),
-                            String.valueOf(lockDuration.toSeconds()).getBytes()));
+            redisClient.evalInteger(LockScripts.RENEW, List.of(lockKey),
+                    List.of(value, String.valueOf(lockDuration.toSeconds())));
         } catch (Exception e) {
             log.warn("看门狗续期失败，lockKey={}, 原因: {}", lockKey, e.getMessage());
         }
@@ -244,11 +241,7 @@ public class DistributedLockService implements AutoCloseable {
         lock.stopWatchDog();
         lock.markReleased();
         try {
-            redisClient.execute(connection ->
-                    connection.eval(LockScripts.UNLOCK.getBytes(),
-                            org.springframework.data.redis.connection.ReturnType.INTEGER, 1,
-                            lock.getLockKey().getBytes(),
-                            lock.getValue().getBytes()));
+            redisClient.evalInteger(LockScripts.UNLOCK, List.of(lock.getLockKey()), List.of(lock.getValue()));
             lockCounter.decrementAndGet();
         } catch (Exception e) {
             log.error("释放分布式锁失败，lockKey={}, 原因: {}", lock.getLockKey(), e.getMessage());

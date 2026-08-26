@@ -5,6 +5,7 @@ import io.github.sombreknight.feather.cache.cache.impl.LocalCacheClient;
 import io.github.sombreknight.feather.cache.cache.impl.RedisCacheClient;
 import io.github.sombreknight.feather.cache.lock.DistributedLockService;
 import io.github.sombreknight.feather.cache.redis.FeatherRedisClient;
+import io.github.sombreknight.feather.cache.redis.RedisConnectionConfig;
 import io.github.sombreknight.feather.cache.support.NamingStrategy;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,8 +24,11 @@ import static org.assertj.core.api.Assertions.assertThat;
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
                 "spring.application.name=test-service",
+                "feather.cache.redis.host=redis-host",
+                "feather.cache.redis.port=6380",
+                "feather.cache.redis.database=2",
+                "feather.cache.redis.mode=standalone",
                 "feather.cache.local.max-size=100",
-                "feather.cache.local.ttl=1s",
                 "feather.cache.lock.default-wait=2s",
                 "feather.cache.lock.default-lock-duration=15s",
                 "feather.cache.lock.enable-watch-dog=false"
@@ -69,20 +73,24 @@ class FeatherCacheAutoConfigurationTest {
 
     @Test
     void propertiesAreBound() {
+        assertThat(properties.getRedis().getHost()).isEqualTo("redis-host");
+        assertThat(properties.getRedis().getPort()).isEqualTo(6380);
+        assertThat(properties.getRedis().getDatabase()).isEqualTo(2);
+        assertThat(properties.getRedis().getMode()).isEqualTo(RedisConnectionConfig.Mode.STANDALONE);
         assertThat(properties.getLocal().getMaxSize()).isEqualTo(100);
-        assertThat(properties.getLocal().getTtl()).isEqualTo(Duration.ofSeconds(1));
         assertThat(properties.getLock().getDefaultWait()).isEqualTo(Duration.ofSeconds(2));
         assertThat(properties.getLock().getDefaultLockDuration()).isEqualTo(Duration.ofSeconds(15));
         assertThat(properties.getLock().isEnableWatchDog()).isFalse();
     }
 
     @Test
-    void localCacheTtlPropagatesFromProperties() throws InterruptedException {
-        // feather.cache.local.ttl=1s 已作为默认 TTL 传入 LocalCacheClient（set 不传 ttl 时生效）
-        localCacheClient.set("k", "v", null);
-        assertThat(localCacheClient.get("k")).isEqualTo("v");
-
-        Thread.sleep(1200);
-        assertThat(localCacheClient.get("k")).isNull();
+    void redisDefaultsAreStandaloneLocalhost() {
+        // 未配置时的默认值：standalone + localhost:6379 + db0
+        FeatherCacheProperties defaults = new FeatherCacheProperties();
+        assertThat(defaults.getRedis().getMode()).isEqualTo(RedisConnectionConfig.Mode.STANDALONE);
+        assertThat(defaults.getRedis().getHost()).isEqualTo("localhost");
+        assertThat(defaults.getRedis().getPort()).isEqualTo(6379);
+        assertThat(defaults.getRedis().getDatabase()).isZero();
+        assertThat(defaults.getRedis().isSsl()).isFalse();
     }
 }

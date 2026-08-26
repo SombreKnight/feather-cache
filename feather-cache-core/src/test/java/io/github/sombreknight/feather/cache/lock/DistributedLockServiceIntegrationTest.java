@@ -1,14 +1,13 @@
 package io.github.sombreknight.feather.cache.lock;
 
 import io.github.sombreknight.feather.cache.redis.FeatherRedisClient;
+import io.github.sombreknight.feather.cache.redis.FeatherRedisConnectionFactory;
+import io.github.sombreknight.feather.cache.redis.RedisConnectionConfig;
 import io.github.sombreknight.feather.cache.support.NamingStrategy;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.net.URI;
 import java.time.Duration;
@@ -30,7 +29,7 @@ class DistributedLockServiceIntegrationTest {
 
     private static final String REDIS_URL = System.getenv("REDIS_TEST_URL");
 
-    private static StringRedisTemplate redisTemplate;
+    private static FeatherRedisConnectionFactory connectionFactory;
     private static FeatherRedisClient redisClient;
     private static DistributedLockService lockService;
 
@@ -40,28 +39,25 @@ class DistributedLockServiceIntegrationTest {
                 "未配置 REDIS_TEST_URL，跳过锁集成测试");
 
         URI uri = URI.create(REDIS_URL);
-        LettuceConnectionFactory factory = new LettuceConnectionFactory(
-                new RedisStandaloneConfiguration(uri.getHost(), uri.getPort()));
-        factory.afterPropertiesSet();
-
-        redisTemplate = new StringRedisTemplate(factory);
-        redisTemplate.afterPropertiesSet();
-
-        redisClient = new FeatherRedisClient(redisTemplate);
+        connectionFactory = new FeatherRedisConnectionFactory(RedisConnectionConfig.builder()
+                .host(uri.getHost())
+                .port(uri.getPort())
+                .build());
+        redisClient = new FeatherRedisClient(connectionFactory);
         lockService = new DistributedLockService(new NamingStrategy("test-app"), redisClient);
     }
 
     @AfterAll
     static void destroy() {
-        if (redisTemplate != null) {
-            redisTemplate.getConnectionFactory().getConnection().close();
+        if (connectionFactory != null) {
+            connectionFactory.close();
         }
     }
 
     @BeforeEach
     void cleanUp() {
         assumeTrue(REDIS_URL != null && !REDIS_URL.trim().isEmpty(), "跳过");
-        redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        connectionFactory.flushAll();
     }
 
     // ---------------------------------------------------------------- 互斥
@@ -148,7 +144,7 @@ class DistributedLockServiceIntegrationTest {
         String lockKey = new NamingStrategy("test-app").lockKey("order:5");
 
         // 模拟锁在 redis 侧过期（等价于业务执行超时 TTL 到期）：直接删除锁 key
-        redisTemplate.delete(lockKey);
+        redisClient.delete(lockKey);
 
         // 他人（其他线程）加锁成功，持有新 value
         Optional<FeatherLock> other = inOtherThread(() -> lockService.tryLock("order:5"));
@@ -156,10 +152,10 @@ class DistributedLockServiceIntegrationTest {
 
         // 原持有者释放：value 不匹配，Lua 返回 0，不得删除他人的锁
         holder.close();
-        assertThat(redisTemplate.opsForValue().get(lockKey)).isNotNull();
+        assertThat(redisClient.get(lockKey)).isNotNull();
 
         other.get().close();
-        assertThat(redisTemplate.opsForValue().get(lockKey)).isNull();
+        assertThat(redisClient.get(lockKey)).isNull();
         noWatchDog.close();
     }
 
@@ -233,8 +229,7 @@ class DistributedLockServiceIntegrationTest {
     @Test
     void lockKeyUsesNamingStrategyPrefix() {
         try (FeatherLock ignored = lockService.lock("order:11", Duration.ofSeconds(1), Duration.ofSeconds(10))) {
-            String raw = redisTemplate.opsForValue()
-                    .get(new NamingStrategy("test-app").lockKey("order:11"));
+            String raw = redisClient.get(new NamingStrategy("test-app").lockKey("order:11"));
             assertThat(raw).isNotNull();
         }
     }

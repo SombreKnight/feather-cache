@@ -6,7 +6,7 @@
 
     <groupId>io.github.sombreknight</groupId>
     <artifactId>feather-cache</artifactId>
-    <version>0.1.1</version>
+    <version>1.0.0</version>
     <packaging>pom</packaging>
 
     <name>feather-cache</name>

@@ -10,81 +10,63 @@
 <dependency>
     <groupId>io.github.sombreknight</groupId>
     <artifactId>feather-cache-spring-boot-starter</artifactId>
-    <version>0.1.1</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
-### 配置（连接完全复用 `spring.data.redis.*`）
+### 配置（自闭环，`feather.cache.redis.*`）
 
 ```yaml
 spring:
   application:
     name: order-service        # 用于 key 前缀 {app}，如 feather:order-service:cache:user:123
-  data:
-    redis:
-      host: localhost
-      port: 6379
 
 feather:
   cache:
     enabled: true              # 默认启用
     # namespace: order-service # 可选，覆盖 spring.application.name 作为 key 前缀
+    redis:                     # Redis 连接（lettuce 自建，自闭环；不依赖 spring.data.redis.*）
+      mode: standalone         # standalone（默认）| sentinel | cluster
+      host: localhost
+      port: 6379
+      # password:              # 可选
+      # database: 0
+      # ssl: false
+      # timeout: 3s
     local:
-      max-size: 4096           # 本地缓存最大条目数
-      ttl: 10s                 # 本地缓存默认过期（per-key TTL 未指定时兜底）
+      max-size: 4096           # 本地缓存最大条目数（过期由 per-key TTL 控制，无全局配置）
     lock:
       default-wait: 3s         # lock() 默认等待超时
       default-lock-duration: 30s  # 锁默认时长（看门狗自动续期）
       enable-watch-dog: true   # 看门狗续期总开关
 ```
 
-> 框架**不创建连接工厂**——零额外连接配置。`spring.data.redis.*` 怎么配，框架就怎么连。
+> 框架**基于 Lettuce 自建连接**——配置全部收在 `feather.cache.redis.*`，不再需要 Spring Data Redis。
+> Redis 不可达时应用可正常启动，按 `CacheReadMode` 显式降级（fail-fast / RETURN_NULL / FALLBACK_LOCAL）。
 
 ### 集群 / 哨兵模式
 
-feather-cache 不感知部署形态——连接完全由 `spring.data.redis.*` 决定，单机/哨兵/集群/分片集群**改配置即切换，零代码改动**（底层 Lettuce 自动拓扑发现与路由）：
+feather-cache 按 `feather.cache.redis.mode` 选择部署形态，单机/哨兵/集群**改配置即切换，零代码改动**（底层 Lettuce 自动拓扑发现与路由）：
 
 ```yaml
-spring:
-  data:
+feather:
+  cache:
     redis:
+      mode: cluster                                   # 集群
       cluster:
-        nodes: redis-1:6379,redis-2:6379,redis-3:6379   # 集群：列出任意/全部节点
-#      sentinel:                                        # 哨兵（二选一）
-#        master: mymaster
-#        nodes: sentinel-1:26379,sentinel-2:26379
+        nodes: redis-1:6379,redis-2:6379,redis-3:6379 # 列出任意/全部节点，拓扑自动发现
+#     mode: sentinel                                  # 哨兵（二选一）
+#     sentinel:
+#       master: mymaster
+#       nodes: sentinel-1:26379,sentinel-2:26379
 ```
 
 **集群兼容性说明**（已实测验证）：
-- 批量读走 **pipeline 逐 key get**（非原生 MGET）——key 跨 slot 时无 CROSSSLOT 错误，Lettuce 按 slot 自动路由
+- 批量读走 **逐 key get**（单机/哨兵走原生 MGET；集群逐 key 经 Lettuce 多路复用即流水线）——key 跨 slot 时无 CROSSSLOT 错误
 - 锁的 Lua 脚本为**单 key**（`KEYS[1]`）——Redis Cluster 要求脚本 keys 同 slot，单 key 天然满足
 - 集群故障转移窗口（主节点宕机未同步到从节点时的锁丢失）是单实例锁的固有限制，非 Redlock 实现均存在
 
-> 集成测试：`REDIS_CLUSTER_TEST_URL=127.0.0.1:7001,127.0.0.1:7002,...` 启用（未配置自动跳过，同 REDIS_TEST_URL 策略）。
-
-```yaml
-spring:
-  application:
-    name: order-service        # 用于 key 前缀 {app}，如 feather:order-service:cache:user:123
-  data:
-    redis:
-      host: localhost
-      port: 6379
-
-feather:
-  cache:
-    enabled: true              # 默认启用
-    # namespace: order-service # 可选，覆盖 spring.application.name 作为 key 前缀
-    local:
-      max-size: 4096           # 本地缓存最大条目数
-      ttl: 10s                 # 本地缓存默认过期（per-key TTL 未指定时兜底）
-    lock:
-      default-wait: 3s         # lock() 默认等待超时
-      default-lock-duration: 30s  # 锁默认时长（看门狗自动续期）
-      enable-watch-dog: true   # 看门狗续期总开关
-```
-
-> 框架**不创建连接工厂**——零额外连接配置。`spring.data.redis.*` 怎么配，框架就怎么连。
+> 集成测试：`REDIS_TEST_URL=redis://localhost:6379`（单机）/ `REDIS_CLUSTER_TEST_URL=127.0.0.1:7001,127.0.0.1:7002,...`（集群）启用；未配置自动跳过。
 
 ## 2. 缓存（FeatherCache）
 

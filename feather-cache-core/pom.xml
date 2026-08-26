@@ -7,19 +7,15 @@
     <parent>
         <groupId>io.github.sombreknight</groupId>
         <artifactId>feather-cache</artifactId>
-        <version>0.1.1</version>
+        <version>1.0.0</version>
     </parent>
 
     <artifactId>feather-cache-core</artifactId>
     <name>feather-cache-core</name>
-    <description>Feather Cache 核心：Redis 客户端封装、多级缓存服务、分布式锁（零 boot 依赖）</description>
+    <description>Feather Cache 核心：Redis 客户端封装（lettuce 自建连接）、多级缓存服务、分布式锁（零 boot 依赖）</description>
 
     <dependencies>
-        <!-- 基于 Spring Data Redis（Lettuce 底层，连接由 Spring 托管） -->
-        <dependency>
-            <groupId>org.springframework.data</groupId>
-            <artifactId>spring-data-redis</artifactId>
-        </dependency>
+        <!-- Redis 客户端（自建连接，不依赖 Spring Data Redis） -->
         <dependency>
             <groupId>io.lettuce</groupId>
             <artifactId>lettuce-core</artifactId>

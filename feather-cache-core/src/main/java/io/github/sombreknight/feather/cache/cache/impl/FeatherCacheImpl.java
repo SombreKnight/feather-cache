@@ -295,8 +295,10 @@ public class FeatherCacheImpl implements FeatherCache {
             case LOCAL_ONLY -> localCacheClient.set(cacheKey, codec.toJson(value), config.getLocalTtl());
             case REDIS_ONLY -> redisCacheClient.set(cacheKey, codec.toJson(value), config.getRedisTtl());
             case LOCAL_FIRST_THEN_REDIS -> {
-                localCacheClient.set(cacheKey, codec.toJson(value), config.getLocalTtl());
-                redisCacheClient.set(cacheKey, codec.toJson(value), config.getRedisTtl());
+                // 序列化一次，本地/Redis 两层共用（避免同一对象被 toJson 两遍）
+                String json = codec.toJson(value);
+                localCacheClient.set(cacheKey, json, config.getLocalTtl());
+                redisCacheClient.set(cacheKey, json, config.getRedisTtl());
             }
             default -> throw new IllegalArgumentException("不支持的缓存类型: " + config.getType());
         }

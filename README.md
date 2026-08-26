@@ -4,8 +4,8 @@
 [![CI](https://github.com/SombreKnight/feather-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/SombreKnight/feather-cache/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-基于 Spring Data Redis 的轻量级**多级缓存 + 分布式锁**框架。对标 [feather-orm](https://github.com/SombreKnight/feather-orm) / [feather-rmq](https://github.com/SombreKnight/feather-rmq) 的极简设计哲学：
-**不重造连接层，复用 `spring.data.redis.*` 配置；缓存防击穿/防穿透开箱即用；分布式锁 Lua 原子 + 看门狗续期。**
+基于 Lettuce 自建连接的轻量级**多级缓存 + 分布式锁**框架。对标 [feather-orm](https://github.com/SombreKnight/feather-orm) / [feather-rmq](https://github.com/SombreKnight/feather-rmq) 的极简设计哲学：
+**配置自闭环（`feather.cache.*` 一套前缀，不依赖 Spring Data Redis）；缓存防击穿/防穿透开箱即用；分布式锁 Lua 原子 + 看门狗续期。**
 
 ## 特性
 
@@ -17,9 +17,9 @@
 - **分布式锁**：Lua 原子加锁/释放（compare-and-delete）、看门狗自动续期、重入计数、
   try-with-resources 使用，杜绝锁泄漏与误删
 - **异常策略显式化**：Redis 故障 fail-fast 或显式降级（RETURN_NULL / FALLBACK_LOCAL），绝不静默吞异常
-- **零配置接入**：只需 `spring.data.redis.*` 连接配置，无额外连接工厂
-- **单机/集群/哨兵皆可**：连接形态由 Spring 配置决定，改配置即切换，零代码改动
-  （pipeline 逐 key get 无 CROSSSLOT，锁 Lua 单 key 天然兼容集群）
+- **配置自闭环**：`feather.cache.redis.*` 一套配置（基于 Lettuce 自建连接），不依赖 Spring Data Redis / `spring.data.redis.*`
+- **单机/集群/哨兵皆可**：`feather.cache.redis.mode` 决定部署形态，改配置即切换，零代码改动
+  （集群 mget 逐 key 无 CROSSSLOT，锁 Lua 单 key 天然兼容集群）
 
 ## 快速开始
 
@@ -29,25 +29,23 @@
 <dependency>
     <groupId>io.github.sombreknight</groupId>
     <artifactId>feather-cache-spring-boot-starter</artifactId>
-    <version>0.1.1</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
-### 2. 配置（复用 `spring.data.redis.*`）
+### 2. 配置（自闭环，`feather.cache.redis.*`）
 
 ```yaml
 spring:
   application:
     name: order-service
-  data:
-    redis:
-      host: localhost
-      port: 6379
 
 feather:
   cache:
     enabled: true        # 默认启用
-```
+    redis:
+      host: localhost    # 连接配置收在 feather.cache.redis.*（lettuce 自建）
+      port: 6379
 
 ### 3. 使用缓存
 
