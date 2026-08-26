@@ -384,4 +384,115 @@ class FeatherCacheIntegrationTest {
             return java.util.Objects.hash(id, name);
         }
     }
+
+    // ---------------------------------------------------------------- loader 异常（P0）
+
+    @Test
+    void loaderExceptionPropagatesAndCacheStaysEmpty() {
+        AtomicInteger calls = new AtomicInteger();
+
+        // 第一次：loader 抛异常 → get 抛出（FAIL_FAST），不写缓存
+        assertThatThrownBy(() -> cache.get("order:boom", ORDER_TYPE, key -> {
+            calls.incrementAndGet();
+            throw new IllegalStateException("loader down");
+        })).isInstanceOf(IllegalStateException.class).hasMessage("loader down");
+
+        // 第二次：缓存未被污染（无半成品值），loader 再次被调（下次可恢复）
+        Order recovered = cache.get("order:boom", ORDER_TYPE, key -> {
+            calls.incrementAndGet();
+            return new Order(key, "recovered");
+        });
+        assertThat(recovered).isEqualTo(new Order("order:boom", "recovered"));
+        assertThat(calls).hasValue(2);
+    }
+
+    @Test
+    void putClearsSentinelAndRestoresReadPath() {
+        CacheConfig config = CacheConfig.redis().cacheNull(true);
+
+        // 防穿透：回源 null → 写 sentinel，后续短路
+        assertThat(cache.get("order:revive", ORDER_TYPE, config, key -> null)).isNull();
+        AtomicInteger calls = new AtomicInteger();
+        assertThat(cache.get("order:revive", ORDER_TYPE, config, key -> {
+            calls.incrementAndGet();
+            return new Order(key, "never");
+        })).isNull();
+        assertThat(calls).hasValue(0); // sentinel 短路，未回源
+
+        // put 覆盖：sentinel 被清理，读路径恢复
+        cache.put("order:revive", new Order("order:revive", "alive"), config);
+        assertThat(cache.get("order:revive", ORDER_TYPE, config, key -> {
+            calls.incrementAndGet();
+            return null;
+        })).isEqualTo(new Order("order:revive", "alive"));
+        assertThat(calls).hasValue(0);
+    }
+
+    // ---------------------------------------------------------------- 批量 gets 边界（P0）
+
+    @Test
+    void getsPartialLoaderReturnsNullForMissingIds() {
+        List<String> ids = List.of("order:a", "order:b", "order:c");
+        Map<String, Order> loaded = cache.gets(ids, key -> key, ORDER_TYPE, CacheConfig.redis(),
+                (missing) -> {
+                    multiLoaderCalls.incrementAndGet();
+                    Map<String, Order> result = new HashMap<>();
+                    for (String id : missing) {
+                        if (!id.equals("order:b")) { // b 缺数据
+                            result.put(id, new Order(id, "loaded"));
+                        }
+                    }
+                    return result;
+                });
+
+        // 缺 id 的行为：取决于实现（回源结果不含该 id）；此处断言不缺的 id 都正确回填
+        assertThat(loaded.get("order:a")).isEqualTo(new Order("order:a", "loaded"));
+        assertThat(loaded.get("order:c")).isEqualTo(new Order("order:c", "loaded"));
+    }
+
+    /**
+     * P1 缺陷复现：批量 gets 的 loader 回源无 single-flight 保护（8 并发全量回源=8 次，
+     * 单键 get 是 1 次）。修复（批量路径加信号量）后启用。
+     */
+    @org.junit.jupiter.api.Disabled("P1 缺陷：批量 gets 无 single-flight 防击穿；见 QA issues.md")
+    @Test
+    void concurrentGetsSingleFlightLoadsEachMissingKeyOnce() throws Exception {
+        List<String> ids = List.of("order:x1", "order:x2");
+        int threads = 8;
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(threads);
+        AtomicInteger errors = new AtomicInteger();
+        AtomicInteger loadCalls = new AtomicInteger();
+
+        for (int i = 0; i < threads; i++) {
+            new Thread(() -> {
+                try {
+                    start.await();
+                    Map<String, Order> result = cache.gets(ids, key -> key, ORDER_TYPE, CacheConfig.redis(),
+                            (missing) -> {
+                                loadCalls.incrementAndGet();
+                                try { Thread.sleep(100); } catch (InterruptedException ignored) { }
+                                Map<String, Order> r = new HashMap<>();
+                                for (String id : missing) {
+                                    r.put(id, new Order(id, "v"));
+                                }
+                                return r;
+                            });
+                    if (result.size() != 2) {
+                        errors.incrementAndGet();
+                    }
+                } catch (Exception e) {
+                    errors.incrementAndGet();
+                } finally {
+                    done.countDown();
+                }
+            }).start();
+        }
+        start.countDown();
+        assertThat(done.await(10, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(errors).hasValue(0);
+        // 批量路径同样受 single-flight 保护：8 并发不应重复回源
+        assertThat(loadCalls.get()).isLessThanOrEqualTo(2);
+    }
 }

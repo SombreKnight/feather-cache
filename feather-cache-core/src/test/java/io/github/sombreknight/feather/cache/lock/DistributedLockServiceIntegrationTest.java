@@ -254,4 +254,108 @@ class DistributedLockServiceIntegrationTest {
             pool.shutdownNow();
         }
     }
+
+    // ---------------------------------------------------------------- 看门狗边界（P0）
+
+    /**
+     * P0 缺陷复现：锁时长 &lt;1s 时 {@code setIfAbsent} 与看门狗都用 {@code ttl.toSeconds()}，
+     * 0 秒 TTL 使 Redis 拒绝加锁（ERR invalid expire time）。修复（毫秒 PX 或入参校验）后启用。
+     */
+    @org.junit.jupiter.api.Disabled("P0 缺陷：锁时长<1s 加锁直接失败；见 QA issues.md")
+    @Test
+    void subSecondLockDurationKeepsMutualExclusion() throws Exception {
+        try (FeatherLock ignored = lockService.lock("it.subsecond", Duration.ofSeconds(3), Duration.ofMillis(500))) {
+            // 500ms 锁应仍被本线程持有：他人线程拿不到
+            Optional<FeatherLock> other = inOtherThread(() -> lockService.tryLock("it.subsecond"));
+            assertThat(other).isEmpty();
+        }
+    }
+
+    /**
+     * 看门狗正常续期：锁时长 2s，持有 2.5s（跨多个续期周期）后锁仍有效。
+     */
+    @Test
+    void lockSurvivesBeyondDurationViaWatchdog() throws Exception {
+        try (FeatherLock ignored = lockService.lock("it.watchdog", Duration.ofSeconds(3), Duration.ofSeconds(2))) {
+            Thread.sleep(2500); // 超过锁时长，看门狗应已续期
+            Optional<FeatherLock> other = inOtherThread(() -> lockService.tryLock("it.watchdog"));
+            assertThat(other).isEmpty();
+        }
+    }
+
+    // ---------------------------------------------------------------- 重入边界
+
+    @Test
+    void deepReentrancyThreeLevels() throws Exception {
+        Optional<FeatherLock> level1 = lockService.tryLock("it.deep");
+        assertThat(level1).isPresent();
+        Optional<FeatherLock> level2 = lockService.tryLock("it.deep");
+        Optional<FeatherLock> level3 = lockService.tryLock("it.deep");
+        assertThat(level2).isPresent();
+        assertThat(level3).isPresent();
+
+        // 乱序关闭：先关外层（计数 3→2），锁仍持有
+        level3.get().close();
+        level2.get().close();
+        assertThat(inOtherThread(() -> lockService.tryLock("it.deep"))).isEmpty();
+
+        // 全部关闭后释放
+        level1.get().close();
+        assertThat(lockService.tryLock("it.deep")).isPresent();
+    }
+
+    // ---------------------------------------------------------------- execute 模板
+
+    @Test
+    void executeWrapsBusinessException() {
+        IllegalStateException biz = new IllegalStateException("biz boom");
+        assertThatThrownBy(() -> lockService.execute("it.execute", () -> {
+            throw biz;
+        })).isInstanceOf(io.github.sombreknight.feather.cache.exception.FeatherCacheException.class)
+                .hasCause(biz);
+    }
+
+    @Test
+    void executeRunsAndReleasesLockAfterwards() {
+        lockService.execute("it.execute2", () -> { });
+        // 执行后锁已释放
+        assertThat(lockService.tryLock("it.execute2")).isPresent();
+    }
+
+    // ---------------------------------------------------------------- 并发争抢（压力）
+
+    @Test
+    void multiThreadContentionEnsuresSingleWinner() throws Exception {
+        int threads = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        AtomicInteger winners = new AtomicInteger();
+        AtomicInteger counter = new AtomicInteger();
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(threads);
+
+        for (int i = 0; i < threads; i++) {
+            pool.submit(() -> {
+                try {
+                    start.await();
+                    try (FeatherLock ignored = lockService.lock("it.stress", Duration.ofSeconds(5), Duration.ofSeconds(2))) {
+                        winners.incrementAndGet();
+                        counter.incrementAndGet();
+                        Thread.sleep(300); // 持锁期间互斥
+                        counter.decrementAndGet();
+                        assertThat(counter.get()).isZero(); // 持锁期间无其他线程进入
+                    } catch (LockTimeoutException e) {
+                        // 未抢到锁，正常
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        start.countDown();
+        assertThat(done.await(20, TimeUnit.SECONDS)).isTrue();
+        // 每个线程都最终拿到过锁（串行执行），且任意时刻只有一个赢家
+        assertThat(winners.get()).isEqualTo(threads);
+    }
 }
