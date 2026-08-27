@@ -47,7 +47,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           echo "Releasing version: ${VERSION}"
-          mvn -q versions:set -DnewVersion=${VERSION} -DgenerateBackupPoms=false
+          mvn -q versions:set -DnewVersion=${VERSION} -DgenerateBackupPoms=false -DprocessAllModules=true
 
       - name: Build & test
         run: mvn -B test
