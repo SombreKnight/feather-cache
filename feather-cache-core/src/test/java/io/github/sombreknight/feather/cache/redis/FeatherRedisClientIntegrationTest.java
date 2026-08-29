@@ -91,6 +91,59 @@ class FeatherRedisClientIntegrationTest {
         assertThat(client.ttl("k1")).isLessThanOrEqualTo(5);
     }
 
+    // ---------------------------------------------------------------- 亚秒级 TTL（P0 缺陷回归）
+
+    /**
+     * P0 缺陷回归：TTL &lt;1s 时 SET 必须走 PX 毫秒。
+     * 修复前（1.0.0 发布产物）用 EX + toSeconds()，500ms 取整为 0 → Redis 拒绝 ERR invalid expire time。
+     */
+    @Test
+    void subSecondTtlOnSetAcceptedAndKeyExpires() throws InterruptedException {
+        client.set("k-sub", "v", Duration.ofMillis(500)); // 修复前此处抛 FeatherCacheException
+
+        assertThat(client.get("k-sub")).isEqualTo("v");
+        Thread.sleep(800);
+        assertThat(client.get("k-sub")).isNull(); // 500ms 后应已过期
+    }
+
+    /**
+     * P0 缺陷回归：锁加锁路径 SET NX + 亚秒级 TTL（PX）。
+     */
+    @Test
+    void subSecondTtlOnSetIfAbsentLockExpires() throws InterruptedException {
+        assertThat(client.setIfAbsent("lock-sub", "a", Duration.ofMillis(500))).isTrue();
+        assertThat(client.get("lock-sub")).isEqualTo("a");
+        Thread.sleep(800);
+        assertThat(client.get("lock-sub")).isNull(); // 锁 500ms 后自动释放
+    }
+
+    /**
+     * P0 缺陷回归：expire 走 PEXPIRE 毫秒，亚秒级续期生效。
+     */
+    @Test
+    void subSecondTtlOnExpireCommandExpires() throws InterruptedException {
+        client.set("k-sub-exp", "v", Duration.ofSeconds(60));
+
+        assertThat(client.expire("k-sub-exp", Duration.ofMillis(500))).isTrue();
+        Thread.sleep(800);
+        assertThat(client.get("k-sub-exp")).isNull();
+    }
+
+    /**
+     * 精度回归：1.5s TTL 实际生效约 1.5s（PX 毫秒），而非被 toSeconds() 静默截断为 1s。
+     */
+    @Test
+    void millisecondPrecisionTtlAboveOneSecond() throws InterruptedException {
+        client.set("k-precision", "v", Duration.ofMillis(1500));
+
+        // 1.2s 后（>1s，<1.5s）key 必须仍存在：证明 TTL 是 1.5s 而非 1s
+        Thread.sleep(1200);
+        assertThat(client.get("k-precision")).isEqualTo("v");
+        // 再过 700ms（共 1.9s > 1.5s）应已过期
+        Thread.sleep(700);
+        assertThat(client.get("k-precision")).isNull();
+    }
+
     @Test
     void deleteRemovesKey() {
         client.set("k1", "v1", Duration.ofSeconds(60));

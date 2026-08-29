@@ -309,6 +309,35 @@ class FeatherCacheIntegrationTest {
         assertThat(loaderCalls).hasValue(0);
     }
 
+    // ---------------------------------------------------------------- 亚秒级 TTL（P0 缺陷回归）
+
+    /**
+     * P0 缺陷回归：缓存 redisTtl &lt;1s 时必须可用（PX 毫秒）。
+     * 修复前（1.0.0 发布产物）SET EX + toSeconds()，500ms 取整为 0 → Redis 拒绝写入，回源直接抛异常。
+     */
+    @Test
+    void subSecondRedisTtlBackfillWorksAndExpires() throws InterruptedException {
+        CacheConfig config = CacheConfig.redis(Duration.ofMillis(500));
+
+        Order order = cache.get("order:sub-ttl", ORDER_TYPE, config,
+                key -> new Order(key, "v"));
+        assertThat(order.name).isEqualTo("v");
+
+        // 二次读取命中 Redis（未过期，loader 不调）
+        Order cached = cache.get("order:sub-ttl", ORDER_TYPE, config,
+                key -> { loaderCalls.incrementAndGet(); return new Order(key, "again"); });
+        assertThat(cached.name).isEqualTo("v");
+        assertThat(loaderCalls).hasValue(0);
+
+        Thread.sleep(700); // > 500ms，Redis 层应已过期
+
+        // 过期后再次回源：loader 必须再调一次
+        Order reloaded = cache.get("order:sub-ttl", ORDER_TYPE, config,
+                key -> { loaderCalls.incrementAndGet(); return new Order(key, "reloaded"); });
+        assertThat(reloaded.name).isEqualTo("reloaded");
+        assertThat(loaderCalls).hasValue(1);
+    }
+
     // ---------------------------------------------------------------- 降级
 
     @Test
