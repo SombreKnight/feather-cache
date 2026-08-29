@@ -9,6 +9,13 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    env:
+      REDIS_TEST_URL: redis://localhost:6379
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,6 +56,7 @@ jobs:
           echo "Releasing version: ${VERSION}"
           mvn -q versions:set -DnewVersion=${VERSION} -DgenerateBackupPoms=false -DprocessAllModules=true
 
+      # 发布前冒烟：集成测试含亚秒级 TTL 用例（PX 毫秒回归），redis 服务容器保障可连（#4）
       - name: Build & test
         run: mvn -B test
 
