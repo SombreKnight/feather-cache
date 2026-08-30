@@ -1,6 +1,6 @@
 # Feather Cache 设计文档
 
-> 记录 v0.1.0 起的关键设计决策与取舍（v1.0.0：连接自闭环 + 配置归一化）。为什么这么设计、不做什么、留了什么逃生舱。
+> 记录 v0.1.0 起的关键设计决策与取舍（v1.0.0：连接自闭环 + 配置归一化；v1.0.1：TTL 毫秒化 P0 修复，亚秒级 TTL/锁时长可用）。为什么这么设计、不做什么、留了什么逃生舱。
 > 使用文档见 [usage.md](../usage.md)。
 
 ## 1. 定位
@@ -95,13 +95,15 @@ sentinel key = feather:{app}:sentinel:{key}
 
 ## 8. 分布式锁（Lua 原子 + 看门狗 + 可重入）
 
-### 加锁（SET NX EX，原子）
+### 加锁（SET NX PX，原子，毫秒精度）
 
 ```
-SET feather:{app}:lock:{key} {randomValue} NX EX {lockDuration}
+SET feather:{app}:lock:{key} {randomValue} NX PX {lockDurationMillis}
 ```
 
 - value = 随机 UUID：释放/续期时校验归属
+- 毫秒（PX）支持亚秒级锁时长：`toSeconds()` 对 <1s 取整为 0，Redis 拒绝 `EX 0`；
+  1.0.0 发布产物曾因此亚秒级锁/缓存 TTL 不可用（v1.0.1 P0 修复，issue #4，CI 已加亚秒级集成用例防回归）
 - 阻塞版自旋轮询（50ms），超时抛类型化 `LockTimeoutException`
 - 非阻塞版（tryLock）单次尝试返回 `Optional`
 

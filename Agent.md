@@ -11,7 +11,7 @@
 | 仓库 | https://github.com/SombreKnight/feather-cache（默认分支 `main`） |
 | 包名 | `io.github.sombreknight.feather.cache` |
 | 坐标 | `io.github.sombreknight:feather-cache-spring-boot-starter` |
-| 版本 | 1.0.0 |
+| 版本 | 1.0.1 |
 | License | Apache 2.0 |
 | 技术栈 | Java 17、Spring Boot 3.5.x BOM、Lettuce（自建连接）、Caffeine、Jackson |
 | 设计哲学 | 干净、opinionated、极简配置；连接自闭环（`feather.cache.redis.*`，不依赖 Spring Data Redis）；锁走 Lua + 看门狗 |
@@ -87,4 +87,4 @@ tag vX.Y.Z → push → 验证 repo1 HTTP 200 + CI/Release workflow success。
 - [x] M3：Lua 锁 + 看门狗 + AutoCloseable + execute 模板
 - [x] M4：starter 装配完整化 + FeatherCacheProperties 全属性化
 - [x] M5：samples + usage.md + docs/design.md
-- [x] M6：发布（0.1.x 已上线；1.0.0 连接自闭环 + 配置归一化）
+- [x] M6：发布（0.1.x 已上线；1.0.0 连接自闭环 + 配置归一化；1.0.1 TTL 毫秒化修复亚秒级 P0 + release workflow 补 redis 服务）

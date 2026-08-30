@@ -12,10 +12,11 @@
 - **多级缓存**：`LOCAL_ONLY` / `REDIS_ONLY` / `LOCAL_FIRST_THEN_REDIS` 三种模式，Caffeine 本地 + Redis 远端
 - **防击穿**：每 key 单飞信号量 + 双重检查，缓存重建只放行 1 个回源（按层隔离，无死锁）
 - **防穿透**：空值 sentinel 占位（独立 key 空间，不可能碰撞），可选开关
-- **分层 TTL**：`redisTtl` / `localTtl` 双 TTL，本地缓存支持 **per-key 时效**（每个 key 独立控制）
+- **分层 TTL**：`redisTtl` / `localTtl` 双 TTL，本地缓存支持 **per-key 时效**（每个 key 独立控制）；
+  **毫秒精度（PX）**，亚秒级 TTL 开箱即用（<1s 不取整为 0）
 - **批量回源**：`MultiCacheLoader` 按 ids 批量加载，mget 走 pipeline
 - **分布式锁**：Lua 原子加锁/释放（compare-and-delete）、看门狗自动续期、重入计数、
-  try-with-resources 使用，杜绝锁泄漏与误删
+  try-with-resources 使用，杜绝锁泄漏与误删；锁时长毫秒精度，支持亚秒级
 - **异常策略显式化**：Redis 故障 fail-fast 或显式降级（RETURN_NULL / FALLBACK_LOCAL），绝不静默吞异常
 - **配置自闭环**：`feather.cache.redis.*` 一套配置（基于 Lettuce 自建连接），不依赖 Spring Data Redis / `spring.data.redis.*`
 - **单机/集群/哨兵皆可**：`feather.cache.redis.mode` 决定部署形态，改配置即切换，零代码改动

@@ -183,7 +183,7 @@ String result = lockService.execute("pay:123", () -> doAndReturn());  // 带返�
 
 ### 3.5 锁语义保证
 
-- **原子加锁**：`SET key value NX EX seconds`
+- **原子加锁**：`SET key value NX PX milliseconds`（毫秒精度，支持亚秒级锁时长）
 - **原子释放**：Lua compare-and-delete，value 不匹配（锁已易主）绝不误删
 - **可重入**：同线程重复 lock 同一 key 返回同一实例，close 次数对齐才真正释放
 - **看门狗**：默认每 `lockDuration/3` 续期一次，业务执行超过锁时长不提前失锁；可整体关闭
